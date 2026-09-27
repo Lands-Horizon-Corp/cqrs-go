@@ -2,9 +2,9 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
+	"github.com/Lands-Horizon-Corp/cqrs-go/utils"
 	"github.com/go-playground/validator/v10"
 	"github.com/segmentio/kafka-go"
 	"github.com/uptrace/bun"
@@ -22,10 +22,10 @@ const (
 	EventTypeDeleted
 )
 
-type CQRSQueuePayload struct {
-	EventID   string          `json:"event_id"`
-	EventType EventType       `json:"event_type"`
-	Payload   json.RawMessage `json:"payload"`
+type CQRSQueuePayload[TData any] struct {
+	EventID   string    `json:"event_id"`
+	EventType EventType `json:"event_type"`
+	Payload   TData     `json:"payload"`
 }
 
 type ProcessedEvent struct {
@@ -83,6 +83,10 @@ type RepositoryImpl[TData any, TResponse any, TRequest any, TID any] struct {
 	MessageBrokerService MessageBrokerService
 	SQLService           SQLService
 	Validator            *validator.Validate
+
+	stringSlicePool     *utils.BufferPool[string]
+	stringSetPool       *utils.MapPool[string, bool]
+	processedEventsPool *utils.BufferPool[ProcessedEvent]
 }
 
 func NewRepository[TData any, TResponse any, TRequest any, TID any](
@@ -115,5 +119,9 @@ func NewRepository[TData any, TResponse any, TRequest any, TID any](
 		MessageBrokerService: params.MessageBrokerService,
 		SQLService:           params.SQLService,
 		Validator:            params.Validator,
+
+		stringSlicePool:     utils.NewBufferPool[string](),
+		stringSetPool:       utils.NewMapPool[string, bool](),
+		processedEventsPool: utils.NewBufferPool[ProcessedEvent](),
 	}
 }

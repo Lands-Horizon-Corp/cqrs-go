@@ -7,7 +7,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) Creates(
+func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) Create(
 	ctx context.Context,
 	data TData,
 ) (*TResponse, error) {
@@ -23,7 +23,6 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) Creates(
 	if err != nil {
 		return nil, fmt.Errorf("inserting record: %w", err)
 	}
-	r.OnCreated(ctx, &data)
 	if r.ToResource != nil {
 		return r.ToResource(&data), nil
 	}
@@ -44,7 +43,6 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) CreateMany(
 			}
 		}
 	}
-
 	_, err := r.WriteDB.NewInsert().
 		Model(&data).
 		Returning("*").
@@ -54,7 +52,6 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) CreateMany(
 	}
 	responses := make([]*TResponse, 0, len(data))
 	for i := range data {
-		r.OnCreated(ctx, &data[i])
 		if r.ToResource != nil {
 			if res := r.ToResource(&data[i]); res != nil {
 				responses = append(responses, res)
@@ -81,7 +78,7 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) CreateWithTx(
 	if err != nil {
 		return nil, fmt.Errorf("inserting record: %w", err)
 	}
-	r.OnCreated(ctx, &data)
+
 	if r.ToResource != nil {
 		return r.ToResource(&data), nil
 	}
