@@ -31,7 +31,7 @@ func NewBatcher[T any](cfg BatcherConfig[T]) *Batcher[T] {
 		cfg.FlushInterval = 50 * time.Millisecond
 	}
 	if cfg.BufferCap <= 0 {
-		cfg.BufferCap = cfg.BatchSize * 2
+		cfg.BufferCap = cfg.BatchSize * 20
 	}
 	return &Batcher[T]{
 		cfg: cfg,

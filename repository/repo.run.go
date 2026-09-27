@@ -3,17 +3,17 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/Lands-Horizon-Corp/cqrs-go/utils"
+	"github.com/bytedance/sonic"
 	"github.com/uptrace/bun"
 )
 
 func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) Run(ctx context.Context) error {
-	return r.RunBatch(ctx, 100, 50*time.Millisecond)
+	return r.RunBatch(ctx, 500, 20*time.Millisecond)
 }
 
 func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) RunBatch(
@@ -24,7 +24,9 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) RunBatch(
 	if r.MessageBrokerService == nil {
 		return errors.New("message broker service is not initialized")
 	}
+
 	r.info(ctx, fmt.Sprintf("starting outbox batch runner for channel: %s", r.Channel))
+
 	batcher := utils.NewBatcher(utils.BatcherConfig[CQRSQueuePayload[TData]]{
 		BatchSize:     batchSize,
 		FlushInterval: flushInterval,
@@ -35,14 +37,17 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) RunBatch(
 			r.error(ctx, fmt.Sprintf("processing outbox batch for channel %s failed: %v", r.Channel, err))
 		},
 	})
+
 	batcher.Start(ctx)
 	defer batcher.Stop()
+
 	return r.MessageBrokerService.Subscribe(ctx, string(r.Channel), func(key, value []byte) error {
 		var env CQRSQueuePayload[TData]
-		if err := json.Unmarshal(value, &env); err != nil {
+		if err := sonic.Unmarshal(value, &env); err != nil {
 			r.error(ctx, fmt.Sprintf("unmarshaling message payload for channel %s: %v", r.Channel, err))
 			return nil
 		}
+
 		if env.EventID == "" {
 			if len(key) > 0 {
 				env.EventID = string(key)
@@ -50,6 +55,7 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) RunBatch(
 				env.EventID = fmt.Sprintf("%s-%d", r.Channel, time.Now().UnixNano())
 			}
 		}
+
 		return batcher.Push(ctx, env)
 	})
 }
@@ -89,29 +95,23 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 		return nil, errors.New("read db is not initialized")
 	}
 	eventIDsPtr := r.stringSlicePool.Get()
-	defer func() {
-		r.stringSlicePool.Put(eventIDsPtr)
-	}()
+	defer r.stringSlicePool.Put(eventIDsPtr)
 
 	seenInBatch := r.stringSetPool.Get()
 	defer r.stringSetPool.Put(seenInBatch)
 
 	existingIDsPtr := r.stringSlicePool.Get()
-	defer func() {
-		r.stringSlicePool.Put(existingIDsPtr)
-	}()
+	defer r.stringSlicePool.Put(existingIDsPtr)
 
 	existingMap := r.stringSetPool.Get()
 	defer r.stringSetPool.Put(existingMap)
 
 	eventsToInsertPtr := r.processedEventsPool.Get()
-	defer func() {
-		r.processedEventsPool.Put(eventsToInsertPtr)
-	}()
+	defer r.processedEventsPool.Put(eventsToInsertPtr)
 
-	// Step A: In-memory deduplication of event IDs
 	eventIDs := *eventIDsPtr
 	uniqueBatch := make([]CQRSQueuePayload[TData], 0, len(batch))
+
 	for _, msg := range batch {
 		if !seenInBatch[msg.EventID] {
 			seenInBatch[msg.EventID] = true
@@ -119,9 +119,12 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 			uniqueBatch = append(uniqueBatch, msg)
 		}
 	}
-	*eventIDsPtr = eventIDs // Save slice header back to pointer for pool retention
+	*eventIDsPtr = eventIDs
 
-	// Step B: Bulk query existing event_ids in 1 SQL query
+	if len(uniqueBatch) == 0 {
+		return nil, nil
+	}
+
 	err := r.ReadDB.NewSelect().
 		Model((*ProcessedEvent)(nil)).
 		Column("event_id").
@@ -134,8 +137,6 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 	for _, id := range *existingIDsPtr {
 		existingMap[id] = true
 	}
-
-	// Step C: Filter out duplicate events
 	newMessages := make([]CQRSQueuePayload[TData], 0, len(uniqueBatch))
 	eventsToInsert := *eventsToInsertPtr
 	now := time.Now()
@@ -150,24 +151,41 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 			})
 		}
 	}
-	*eventsToInsertPtr = eventsToInsert // Save slice header back to pointer for pool retention
-
+	*eventsToInsertPtr = eventsToInsert
 	if len(newMessages) == 0 {
 		return nil, nil
 	}
-
-	// Step D: Execute single multi-row transaction
-	err = r.ReadDB.RunInTx(ctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
-		// 1. Bulk insert ProcessedEvent records
-		_, err := tx.NewInsert().
-			Model(eventsToInsertPtr).
-			Ignore().
-			Exec(ctx)
-		if err != nil {
-			return fmt.Errorf("bulk inserting processed events: %w", err)
+	latestEntityState := make(map[string]CQRSQueuePayload[TData])
+	entityOrder := make([]string, 0, len(newMessages))
+	for _, msg := range newMessages {
+		var idStr string
+		if r.Tabular != nil {
+			tabularData := r.Tabular(&msg.Payload)
+			if val, ok := tabularData[r.ColumnDefaultID]; ok {
+				idStr = fmt.Sprintf("%v", val)
+			}
 		}
-		upsertEntities := make([]TData, 0, len(newMessages))
-		deleteEntities := make([]TData, 0, len(newMessages))
+		if idStr != "" {
+			if _, exists := latestEntityState[idStr]; !exists {
+				entityOrder = append(entityOrder, idStr)
+			}
+			latestEntityState[idStr] = msg
+		}
+	}
+	upsertEntities := make([]TData, 0, len(latestEntityState))
+	deleteEntities := make([]TData, 0, len(latestEntityState))
+
+	if len(latestEntityState) > 0 {
+		for _, id := range entityOrder {
+			msg := latestEntityState[id]
+			switch msg.EventType {
+			case EventTypeCreated, EventTypeUpdated:
+				upsertEntities = append(upsertEntities, msg.Payload)
+			case EventTypeDeleted:
+				deleteEntities = append(deleteEntities, msg.Payload)
+			}
+		}
+	} else {
 		for _, msg := range newMessages {
 			switch msg.EventType {
 			case EventTypeCreated, EventTypeUpdated:
@@ -176,10 +194,19 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
 				deleteEntities = append(deleteEntities, msg.Payload)
 			}
 		}
+	}
+	err = r.ReadDB.RunInTx(ctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewInsert().
+			Model(eventsToInsertPtr).
+			Ignore().
+			Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("bulk inserting processed events: %w", err)
+		}
 		if len(upsertEntities) > 0 {
 			_, err = tx.NewInsert().
 				Model(&upsertEntities).
-				On("CONFLICT (" + r.ColumnDefaultID + ") DO UPDATE").
+				On(fmt.Sprintf("CONFLICT (%s) DO UPDATE", r.ColumnDefaultID)).
 				Exec(ctx)
 			if err != nil {
 				return fmt.Errorf("bulk upserting entities to read db: %w", err)

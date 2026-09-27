@@ -37,8 +37,8 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) CreateMany(
 		return []*TResponse{}, nil
 	}
 	if r.Validator != nil {
-		for i, req := range data {
-			if err := r.Validator.StructCtx(ctx, req); err != nil {
+		for i := range data {
+			if err := r.Validator.StructCtx(ctx, &data[i]); err != nil {
 				return nil, fmt.Errorf("validating request payload at index %d: %w", i, err)
 			}
 		}

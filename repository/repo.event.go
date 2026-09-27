@@ -26,27 +26,33 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) handleEvent(
 	if data == nil || r.ToResource == nil {
 		return
 	}
-	payload := r.ToResource(data)
-	if payload == nil {
-		return
-	}
-	defer func() {
-		if re := recover(); re != nil {
-			r.error(ctx, fmt.Sprintf("%d panic on channel %s: %v", eventType, r.Channel, re))
+	asyncCtx := context.WithoutCancel(ctx)
+	go func(ctx context.Context, data *TData) {
+		defer func() {
+			if re := recover(); re != nil {
+				r.error(ctx, fmt.Sprintf("%d panic on channel %s: %v", eventType, r.Channel, re))
+			}
+		}()
+		payload := r.ToResource(data)
+		if payload == nil {
+			return
 		}
-	}()
-	var events Events
-	if getEvents != nil {
-		events = getEvents(data)
-	}
-	if r.Dispatch != nil {
-		if err := r.Dispatch(r.Channel, events, payload); err != nil {
-			r.error(ctx, fmt.Sprintf("%d dispatch failed [channel: %s]: %v (type: %T)", eventType, r.Channel, err, data))
+		var events Events
+		if getEvents != nil {
+			events = getEvents(data)
 		}
-	}
-	if r.BroadcastService != nil {
-		if err := r.BroadcastService.Broadcast([]Channel{r.Channel}, events, payload); err != nil {
-			r.error(ctx, fmt.Sprintf("%d broadcast failed [channel: %s]: %v (type: %T)", eventType, r.Channel, err, data))
+		if len(events) == 0 {
+			return
 		}
-	}
+		if r.Dispatch != nil {
+			if err := r.Dispatch(r.Channel, events, payload); err != nil {
+				r.error(ctx, fmt.Sprintf("%d dispatch failed [channel: %s]: %v (type: %T)", eventType, r.Channel, err, data))
+			}
+		}
+		if r.BroadcastService != nil {
+			if err := r.BroadcastService.Broadcast([]Channel{r.Channel}, events, payload); err != nil {
+				r.error(ctx, fmt.Sprintf("%d broadcast failed [channel: %s]: %v (type: %T)", eventType, r.Channel, err, data))
+			}
+		}
+	}(asyncCtx, data)
 }
