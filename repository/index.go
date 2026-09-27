@@ -53,6 +53,11 @@ type MessageBrokerService interface {
 	Subscribe(ctx context.Context, topic string, handler func(key, value []byte) error) error
 }
 
+type SQLService interface {
+	Ping(ctx context.Context) error
+	Client() *bun.DB
+}
+
 type RepositoryImpl[TData any, TResponse any, TRequest any, TID any] struct {
 	WriteDB *bun.DB
 	ReadDB  *bun.DB
@@ -64,7 +69,6 @@ type RepositoryImpl[TData any, TResponse any, TRequest any, TID any] struct {
 	Updated func(*TData) Events
 	Deleted func(*TData) Events
 
-	ToData     func(TRequest) *TData
 	ToResource func(*TData) *TResponse
 
 	ColumnDefaultID   string
@@ -77,6 +81,7 @@ type RepositoryImpl[TData any, TResponse any, TRequest any, TID any] struct {
 	LogService           LogService
 	BroadcastService     BroadcastService
 	MessageBrokerService MessageBrokerService
+	SQLService           SQLService
 	Validator            *validator.Validate
 }
 
@@ -89,6 +94,9 @@ func NewRepository[TData any, TResponse any, TRequest any, TID any](
 	if params.ColumnDefaultSort == "" {
 		params.ColumnDefaultSort = "updated_at DESC"
 	}
+	if params.Validator == nil {
+		params.Validator = validator.New()
+	}
 	return &RepositoryImpl[TData, TResponse, TRequest, TID]{
 		WriteDB:              params.WriteDB,
 		ReadDB:               params.ReadDB,
@@ -98,7 +106,6 @@ func NewRepository[TData any, TResponse any, TRequest any, TID any](
 		Updated:              params.Updated,
 		Deleted:              params.Deleted,
 		ToResource:           params.ToResource,
-		ToData:               params.ToData,
 		ColumnDefaultID:      params.ColumnDefaultID,
 		ColumnDefaultSort:    params.ColumnDefaultSort,
 		Preloads:             params.Preloads,
@@ -106,6 +113,7 @@ func NewRepository[TData any, TResponse any, TRequest any, TID any](
 		LogService:           params.LogService,
 		BroadcastService:     params.BroadcastService,
 		MessageBrokerService: params.MessageBrokerService,
+		SQLService:           params.SQLService,
 		Validator:            params.Validator,
 	}
 }
