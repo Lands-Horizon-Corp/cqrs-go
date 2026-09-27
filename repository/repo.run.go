@@ -8,96 +8,83 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/segmentio/kafka-go"
 	"github.com/uptrace/bun"
 )
 
 func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) Run(ctx context.Context) error {
-	if r.Reader == nil {
-		return errors.New("kafka reader is not initialized")
+	if r.MessageBrokerService == nil {
+		return errors.New("message broker service is not initialized")
 	}
 	r.info(ctx, fmt.Sprintf("starting outbox runner for channel: %s", r.Channel))
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			msg, err := r.Reader.FetchMessage(ctx)
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					return nil
-				}
-				r.error(ctx, fmt.Sprintf("fetching kafka message for channel %s: %v", r.Channel, err))
-				continue
-			}
-			if err := r.processOutboxMessage(ctx, msg); err != nil {
-				r.error(ctx, fmt.Sprintf("processing outbox message at offset %d for channel %s: %v", msg.Offset, r.Channel, err))
-				continue
-			}
-			if err := r.Reader.CommitMessages(ctx, msg); err != nil {
-				r.error(ctx, fmt.Sprintf("committing offset %d for channel %s: %v", msg.Offset, r.Channel, err))
-				continue
-			}
+	return r.MessageBrokerService.Subscribe(ctx, string(r.Channel), func(key, value []byte) error {
+		if err := r.processOutboxMessage(ctx, key, value); err != nil {
+			r.error(ctx, fmt.Sprintf("processing outbox message for channel %s: %v", r.Channel, err))
+			return err
 		}
-	}
+		return nil
+	})
 }
 
 func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) processOutboxMessage(
 	ctx context.Context,
-	msg kafka.Message,
+	key []byte,
+	value []byte,
 ) error {
-	var envelope CQRSQueuePayload
-	if err := json.Unmarshal(msg.Value, &envelope); err != nil {
-		return fmt.Errorf("unmarshaling debezium envelope: %w", err)
+	var env struct {
+		EventID   string    `json:"event_id"`
+		EventType EventType `json:"event_type"`
+		Payload   TData     `json:"payload"`
 	}
-	eventID := envelope.EventID
+	if err := json.Unmarshal(value, &env); err != nil {
+		return fmt.Errorf("unmarshaling message payload: %w", err)
+	}
+	eventID := env.EventID
 	if eventID == "" {
-		eventID = fmt.Sprintf("%s-%d-%d", msg.Topic, msg.Partition, msg.Offset)
+		if len(key) > 0 {
+			eventID = string(key)
+		} else {
+			eventID = fmt.Sprintf("%s-%d", r.Channel, time.Now().UnixNano())
+		}
 	}
-
-	var data TData
-	if err := json.Unmarshal(envelope.Payload, &data); err != nil {
-		return fmt.Errorf("unmarshaling payload entity: %w", err)
-	}
-	if err := r.syncToReadDB(ctx, eventID, envelope.EventType, &data); err != nil {
+	if err := r.syncToReadDB(ctx, eventID, env.EventType, &env.Payload); err != nil {
 		return fmt.Errorf("synchronizing to read db: %w", err)
 	}
 	var events Events
-	switch envelope.EventType {
+	switch env.EventType {
 	case EventTypeCreated:
 		if r.Created != nil {
-			events = r.Created(&data)
+			events = r.Created(&env.Payload)
 		}
 	case EventTypeUpdated:
 		if r.Updated != nil {
-			events = r.Updated(&data)
+			events = r.Updated(&env.Payload)
 		}
 	case EventTypeDeleted:
 		if r.Deleted != nil {
-			events = r.Deleted(&data)
+			events = r.Deleted(&env.Payload)
 		}
 	default:
-		events = Events{fmt.Sprintf("%d", envelope.EventType)}
+		events = Events{fmt.Sprintf("%d", env.EventType)}
 	}
-	var response *TResponse
-	if r.ToResource != nil {
-		response = r.ToResource(&data)
+	if r.ToResource == nil {
+		return nil
 	}
-	if response != nil {
-		if r.Dispatch != nil {
-			if err := r.Dispatch(r.Channel, events, response); err != nil {
-				r.error(ctx, fmt.Sprintf("dispatch failed for channel %s: %v", r.Channel, err))
-			}
+	response := r.ToResource(&env.Payload)
+	if response == nil {
+		return nil
+	}
+	if r.Dispatch != nil {
+		if err := r.Dispatch(r.Channel, events, response); err != nil {
+			r.error(ctx, fmt.Sprintf("dispatch failed for channel %s: %v", r.Channel, err))
 		}
-		if r.BroadcastService != nil {
-			if err := r.BroadcastService.Broadcast([]Channel{r.Channel}, events, response); err != nil {
-				r.error(ctx, fmt.Sprintf("broadcast failed for channel %s: %v", r.Channel, err))
-			}
+	}
+	if r.BroadcastService != nil {
+		if err := r.BroadcastService.Broadcast([]Channel{r.Channel}, events, response); err != nil {
+			r.error(ctx, fmt.Sprintf("broadcast failed for channel %s: %v", r.Channel, err))
 		}
 	}
 	return nil
 }
-
 func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) syncToReadDB(
 	ctx context.Context,
 	eventID string,
@@ -108,23 +95,22 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) syncToReadDB(
 		return errors.New("read db is not initialized")
 	}
 	return r.ReadDB.RunInTx(ctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
-		processedEvent := &ProcessedEvent{
-			EventID:   eventID,
-			Channel:   string(r.Channel),
-			CreatedAt: time.Now(),
-		}
 		res, err := tx.NewInsert().
-			Model(processedEvent).
+			Model(&ProcessedEvent{
+				EventID:   eventID,
+				Channel:   string(r.Channel),
+				CreatedAt: time.Now(),
+			}).
 			Ignore().
 			Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("checking event idempotency: %w", err)
 		}
-		rowsAffected, err := res.RowsAffected()
+		rows, err := res.RowsAffected()
 		if err != nil {
 			return fmt.Errorf("reading idempotency rows affected: %w", err)
 		}
-		if rowsAffected == 0 {
+		if rows == 0 {
 			return nil
 		}
 		switch eventType {
@@ -139,7 +125,7 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) syncToReadDB(
 		case EventTypeDeleted:
 			_, err = tx.NewDelete().
 				Model(data).
-				Where(r.ColumnDefaultID+" = ?", r.getPrimaryKeyValue(data)).
+				WherePK().
 				Exec(ctx)
 			if err != nil {
 				return fmt.Errorf("deleting entity from read db: %w", err)
@@ -147,15 +133,4 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) syncToReadDB(
 		}
 		return nil
 	})
-}
-
-// Helper to extract primary key value via reflection or fallback
-func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) getPrimaryKeyValue(data *TData) any {
-	if r.Tabular != nil {
-		m := r.Tabular(data)
-		if id, ok := m[r.ColumnDefaultID]; ok {
-			return id
-		}
-	}
-	return data
 }

@@ -48,6 +48,7 @@ type BroadcastService interface {
 }
 
 type MessageBrokerService interface {
+	Client() *kafka.Client
 	Publish(ctx context.Context, topic string, key, value []byte) error
 	Subscribe(ctx context.Context, topic string, handler func(key, value []byte) error) error
 }
@@ -55,8 +56,6 @@ type MessageBrokerService interface {
 type RepositoryImpl[TData any, TResponse any, TRequest any, TID any] struct {
 	WriteDB *bun.DB
 	ReadDB  *bun.DB
-	Queue   *kafka.Writer
-	Reader  *kafka.Reader
 
 	Channel  Channel
 	Dispatch func(channel Channel, events Events, payload *TResponse) error
@@ -93,7 +92,6 @@ func NewRepository[TData any, TResponse any, TRequest any, TID any](
 	return &RepositoryImpl[TData, TResponse, TRequest, TID]{
 		WriteDB:              params.WriteDB,
 		ReadDB:               params.ReadDB,
-		Queue:                params.Queue,
 		Channel:              params.Channel,
 		Dispatch:             params.Dispatch,
 		Created:              params.Created,
@@ -105,7 +103,6 @@ func NewRepository[TData any, TResponse any, TRequest any, TID any](
 		ColumnDefaultSort:    params.ColumnDefaultSort,
 		Preloads:             params.Preloads,
 		Tabular:              params.Tabular,
-		Reader:               params.Reader,
 		LogService:           params.LogService,
 		BroadcastService:     params.BroadcastService,
 		MessageBrokerService: params.MessageBrokerService,
