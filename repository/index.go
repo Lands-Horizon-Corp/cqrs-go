@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/segmentio/kafka-go"
@@ -22,8 +23,16 @@ const (
 )
 
 type CQRSQueuePayload struct {
+	EventID   string          `json:"event_id"`
 	EventType EventType       `json:"event_type"`
 	Payload   json.RawMessage `json:"payload"`
+}
+
+type ProcessedEvent struct {
+	bun.BaseModel `bun:"table:processed_events,alias:pe"`
+	EventID       string    `bun:"event_id,pk"`
+	Channel       string    `bun:"channel,notnull"`
+	CreatedAt     time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 }
 
 type LogService interface {
