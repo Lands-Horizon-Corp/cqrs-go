@@ -30,7 +30,6 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) UpdateByID(
 	if err == nil && rows == 0 {
 		return nil, sql.ErrNoRows
 	}
-
 	if r.ToResource != nil {
 		return r.ToResource(&data), nil
 	}

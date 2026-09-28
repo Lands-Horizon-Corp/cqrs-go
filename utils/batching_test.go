@@ -22,8 +22,8 @@ func TestBatcher_Defaults(t *testing.T) {
 	if b.cfg.FlushInterval != 50*time.Millisecond {
 		t.Errorf("expected default FlushInterval 50ms, got %v", b.cfg.FlushInterval)
 	}
-	if b.cfg.BufferCap != 200 {
-		t.Errorf("expected default BufferCap 200, got %d", b.cfg.BufferCap)
+	if b.cfg.BufferCap != 2000 {
+		t.Errorf("expected default BufferCap 2000, got %d", b.cfg.BufferCap)
 	}
 }
 
@@ -131,11 +131,11 @@ func TestBatcher_HappyPath_ConcurrentPushes(t *testing.T) {
 	itemsPerGoroutine := 20
 	var wg sync.WaitGroup
 
-	for i := range numGoroutines {
+	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(base int) {
 			defer wg.Done()
-			for j := range itemsPerGoroutine {
+			for j := 0; j < itemsPerGoroutine; j++ {
 				_ = batcher.Push(ctx, base+j)
 			}
 		}(i * itemsPerGoroutine)

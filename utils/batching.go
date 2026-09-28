@@ -65,19 +65,27 @@ func (b *Batcher[T]) worker(ctx context.Context) {
 	buffer := make([]T, 0, b.cfg.BatchSize)
 	ticker := time.NewTicker(b.cfg.FlushInterval)
 	defer ticker.Stop()
-	flush := func() {
+
+	// Helper to flush buffer using a given context
+	flushWithCtx := func(execCtx context.Context) {
 		if len(buffer) == 0 {
 			return
 		}
 		batchToProcess := make([]T, len(buffer))
 		copy(batchToProcess, buffer)
 		buffer = buffer[:0]
-		if err := b.cfg.Handler(ctx, batchToProcess); err != nil {
+
+		if err := b.cfg.Handler(execCtx, batchToProcess); err != nil {
 			if b.cfg.OnError != nil {
 				b.cfg.OnError(err, batchToProcess)
 			}
 		}
 	}
+
+	flush := func() {
+		flushWithCtx(ctx)
+	}
+
 	for {
 		select {
 		case item, ok := <-b.ch:
@@ -92,19 +100,21 @@ func (b *Batcher[T]) worker(ctx context.Context) {
 		case <-ticker.C:
 			flush()
 		case <-ctx.Done():
+			// Use uncancelled context during shutdown drain so DB operations succeed
+			shutdownCtx := context.WithoutCancel(ctx)
 			for {
 				select {
 				case item, ok := <-b.ch:
 					if !ok {
-						flush()
+						flushWithCtx(shutdownCtx)
 						return
 					}
 					buffer = append(buffer, item)
 					if len(buffer) >= b.cfg.BatchSize {
-						flush()
+						flushWithCtx(shutdownCtx)
 					}
 				default:
-					flush()
+					flushWithCtx(shutdownCtx)
 					return
 				}
 			}
