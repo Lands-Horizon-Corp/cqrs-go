@@ -35,7 +35,7 @@ func TestNilPointer_FieldValueAt_NilPointerIDIsAbsentNotTheStringNil(t *testing.
 		t.Errorf(`expected "" for a nil pointer ID, got %q (would silently collide with every other nil-ID row)`, got)
 	}
 
-	setID := ptrIDEntity{ID: stringPtr("abc"), Name: "n"}
+	setID := ptrIDEntity{ID: new("abc"), Name: "n"}
 	if got := utils.FieldValueAt(&setID, idx); got != "abc" {
 		t.Errorf("expected the dereferenced value %q, got %q (a pointer that isn't dereferenced prints a hex address instead)", "abc", got)
 	}
@@ -67,7 +67,7 @@ func TestNilPointer_CreateUpdateDelete_AllFieldsSetNeverPanics(t *testing.T) {
 
 	full := widget{
 		ID: "w1", Name: "n", Active: true,
-		Featured: boolPtr(true), Notes: stringPtr("n"), Priority: intPtr(1), ExpiresAt: &exp,
+		Featured: new(true), Notes: new("n"), Priority: new(1), ExpiresAt: &exp,
 	}
 	if _, err := c.Create(ctx, full); err != nil {
 		t.Fatalf("Create returned error: %v", err)
@@ -92,10 +92,10 @@ func TestNilPointer_CDCPath_MixedNilAndSetFieldsNeverPanics(t *testing.T) {
 	done := h.runInBackground(ctx)
 
 	cases := []widget{
-		{ID: "w1", Name: "n"},                                        // every pointer nil
-		{ID: "w1", Name: "n2", Featured: boolPtr(true)},              // one set
-		{ID: "w1", Name: "n3", Featured: nil, Notes: stringPtr("x")}, // mixed
-		{ID: "w1", Name: "n4", Priority: intPtr(0)},                  // explicit zero, not nil
+		{ID: "w1", Name: "n"},                                  // every pointer nil
+		{ID: "w1", Name: "n2", Featured: new(true)},            // one set
+		{ID: "w1", Name: "n3", Featured: nil, Notes: new("x")}, // mixed
+		{ID: "w1", Name: "n4", Priority: new(0)},               // explicit zero, not nil
 	}
 
 	for i, w := range cases {

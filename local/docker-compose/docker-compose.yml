@@ -121,6 +121,32 @@ services:
       retries: 20
     networks: [cqrs-net]
 
+  # --- Broadcast (Pusher-compatible) -----------------------------------
+  # Real target for domains.BroadcastService, standing in for Pusher.
+  # Config verified against the image's own default config.json and
+  # https://github.com/sockudo/sockudo docs rather than assumed — the
+  # default adapter/cache/queue drivers are already in-memory ("local"),
+  # so no Redis dependency is needed for a single local instance.
+  sockudo:
+    image: sockudo/sockudo:latest
+    container_name: cqrs-sockudo
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: "6001"
+      SOCKUDO_DEFAULT_APP_ID: cqrs-app
+      SOCKUDO_DEFAULT_APP_KEY: cqrs-app-key
+      SOCKUDO_DEFAULT_APP_SECRET: cqrs-app-secret
+      SOCKUDO_DEFAULT_APP_ENABLED: "true"
+    ports:
+      - "16001:6001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6001/up >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [cqrs-net]
+
   # One-shot: registers the Postgres source connector once Connect is up,
   # then exits. Re-running `docker compose up connector-register` any time
   # is safe (idempotent — see register-connector.sh).

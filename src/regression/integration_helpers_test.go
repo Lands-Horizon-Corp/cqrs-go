@@ -7,22 +7,32 @@
 //	go test -tags=integration ./src/regression/... -run TestIntegration -v
 //
 // Everything here is a REAL connection — real Postgres (both write and
-// read), real Kafka. The only things still mocked are BroadcastService and
-// LogService, because there's no real Pusher/webhook target in this repo
-// to test against.
+// read), real Kafka, and a real Pusher-protocol-compatible broadcaster
+// (sockudo). Only LogService is still mocked, since there's no real log
+// sink in this repo to test against.
 package regression
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/md5"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/segmentio/kafka-go"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -47,6 +57,13 @@ var (
 	itWriteAddr = envOr("CQRS_IT_WRITE_ADDR", "localhost:15433")
 	itReadAddr  = envOr("CQRS_IT_READ_ADDR", "localhost:15434")
 	itKafkaAddr = envOr("CQRS_IT_KAFKA_ADDR", "localhost:29092")
+
+	itPusherAddr      = envOr("CQRS_IT_PUSHER_ADDR", "localhost:16001")
+	itPusherHTTPBase  = envOr("CQRS_IT_PUSHER_HTTP_BASE", "http://localhost:16001")
+	itPusherWSBase    = envOr("CQRS_IT_PUSHER_WS_BASE", "ws://localhost:16001")
+	itPusherAppID     = envOr("CQRS_IT_PUSHER_APP_ID", "cqrs-app")
+	itPusherAppKey    = envOr("CQRS_IT_PUSHER_APP_KEY", "cqrs-app-key")
+	itPusherAppSecret = envOr("CQRS_IT_PUSHER_APP_SECRET", "cqrs-app-secret")
 )
 
 // skipUnlessInfraReachable does a fast TCP dial against each dependency and
@@ -64,6 +81,7 @@ func skipUnlessInfraReachable(t *testing.T) {
 	check("postgres-write", itWriteAddr)
 	check("postgres-read", itReadAddr)
 	check("kafka", itKafkaAddr)
+	check("sockudo", itPusherAddr)
 }
 
 // newPostgresSQLService opens a real Postgres connection via bun/pgdriver.
@@ -218,6 +236,200 @@ func (b *realKafkaBroker) Subscribe(ctx context.Context, topic string, handler f
 		}
 		if err := handler(m.Key, m.Value); err != nil {
 			return err
+		}
+	}
+}
+
+// --- realPusherBroadcaster: a real domains.BroadcastService, backed by ---
+// --- sockudo (Pusher Protocol V1 compatible)                          ---
+//
+// Signing scheme and WS message shapes were verified against the live
+// server (crypto/hmac query signing per sockudo's own http-endpoints.mdx,
+// and the pusher:connection_established / pusher:subscribe /
+// pusher_internal:subscription_succeeded frames per its protocol.mdx)
+// before this was written, not assumed from generic Pusher docs.
+type realPusherBroadcaster struct {
+	httpBase, appID, appKey, appSecret string
+}
+
+func newRealPusherBroadcaster() *realPusherBroadcaster {
+	return &realPusherBroadcaster{
+		httpBase:  itPusherHTTPBase,
+		appID:     itPusherAppID,
+		appKey:    itPusherAppKey,
+		appSecret: itPusherAppSecret,
+	}
+}
+
+func (b *realPusherBroadcaster) sign(method, path string, query url.Values) string {
+	keys := make([]string, 0, len(query))
+	for k := range query {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+query.Get(k))
+	}
+	toSign := method + "\n" + path + "\n" + strings.Join(parts, "&")
+	mac := hmac.New(sha256.New, []byte(b.appSecret))
+	mac.Write([]byte(toSign))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// Broadcast implements domains.BroadcastService: one Pusher trigger call
+// per (channel, event) pair, all carrying the same payload — matching how
+// handleEvent calls it (one payload, possibly several channels/events).
+func (b *realPusherBroadcaster) Broadcast(channels []domains.Channel, events domains.Events, payload any) error {
+	dataJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshalling payload: %w", err)
+	}
+
+	for _, ch := range channels {
+		for _, ev := range events {
+			if err := b.trigger(string(ch), ev, dataJSON); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (b *realPusherBroadcaster) trigger(channel, event string, dataJSON []byte) error {
+	body, err := json.Marshal(map[string]any{
+		"name":     event,
+		"channels": []string{channel},
+		"data":     string(dataJSON),
+	})
+	if err != nil {
+		return fmt.Errorf("marshalling trigger body: %w", err)
+	}
+	bodyMD5 := md5.Sum(body)
+
+	path := fmt.Sprintf("/apps/%s/events", b.appID)
+	q := url.Values{}
+	q.Set("auth_key", b.appKey)
+	q.Set("auth_timestamp", strconv.FormatInt(time.Now().Unix(), 10))
+	q.Set("auth_version", "1.0")
+	q.Set("body_md5", hex.EncodeToString(bodyMD5[:]))
+	q.Set("auth_signature", b.sign("POST", path, q))
+
+	req, err := http.NewRequest(http.MethodPost, b.httpBase+path+"?"+q.Encode(), strings.NewReader(string(body)))
+	if err != nil {
+		return fmt.Errorf("building trigger request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("triggering event: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("trigger returned HTTP %d: %s", resp.StatusCode, string(b))
+	}
+	return nil
+}
+
+// pusherMessage is one frame received over the WS connection.
+type pusherMessage struct {
+	Event   string `json:"event"`
+	Channel string `json:"channel"`
+	Data    string `json:"data"`
+}
+
+// pusherSubscriber is a real Pusher Protocol V1 WebSocket client: it
+// connects, subscribes to one channel, and forwards every subsequent
+// frame on a channel tests can wait on — the only way to actually confirm
+// "was this broadcasted" rather than just "was Broadcast() called".
+type pusherSubscriber struct {
+	conn  *websocket.Conn
+	msgs  chan pusherMessage
+	errs  chan error
+	close func()
+}
+
+func newPusherSubscriber(t *testing.T, channel string) *pusherSubscriber {
+	t.Helper()
+	url := fmt.Sprintf("%s/app/%s?protocol=1", itPusherWSBase, itPusherAppKey)
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatalf("dialing sockudo websocket: %v", err)
+	}
+
+	s := &pusherSubscriber{
+		conn: conn,
+		msgs: make(chan pusherMessage, 64),
+		errs: make(chan error, 1),
+	}
+	s.close = func() { _ = conn.Close() }
+	t.Cleanup(s.close)
+
+	// pusher:connection_established
+	var established pusherMessage
+	if err := conn.ReadJSON(&established); err != nil {
+		t.Fatalf("reading connection_established: %v", err)
+	}
+	if established.Event != "pusher:connection_established" {
+		t.Fatalf("expected pusher:connection_established, got %q", established.Event)
+	}
+
+	sub, err := json.Marshal(map[string]any{
+		"event": "pusher:subscribe",
+		"data":  map[string]any{"channel": channel},
+	})
+	if err != nil {
+		t.Fatalf("marshalling subscribe frame: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, sub); err != nil {
+		t.Fatalf("writing subscribe frame: %v", err)
+	}
+
+	var subAck pusherMessage
+	if err := conn.ReadJSON(&subAck); err != nil {
+		t.Fatalf("reading subscription_succeeded: %v", err)
+	}
+	if subAck.Event != "pusher_internal:subscription_succeeded" {
+		t.Fatalf("expected pusher_internal:subscription_succeeded, got %q", subAck.Event)
+	}
+
+	go func() {
+		for {
+			var m pusherMessage
+			if err := conn.ReadJSON(&m); err != nil {
+				select {
+				case s.errs <- err:
+				default:
+				}
+				return
+			}
+			select {
+			case s.msgs <- m:
+			default:
+			}
+		}
+	}()
+
+	return s
+}
+
+// waitForEvent blocks until a frame with the given event name arrives (any
+// other frames, e.g. pings, are ignored), or fails the test on timeout.
+func (s *pusherSubscriber) waitForEvent(t *testing.T, event string, timeout time.Duration) pusherMessage {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case m := <-s.msgs:
+			if m.Event == event {
+				return m
+			}
+		case err := <-s.errs:
+			t.Fatalf("websocket read error while waiting for %q: %v", event, err)
+		case <-deadline:
+			t.Fatalf("timed out waiting for event %q", event)
 		}
 	}
 }

@@ -198,11 +198,11 @@ func TestBatcher_HappyPath_ConcurrentPushes(t *testing.T) {
 	itemsPerGoroutine := 20
 	var wg sync.WaitGroup
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(base int) {
 			defer wg.Done()
-			for j := 0; j < itemsPerGoroutine; j++ {
+			for j := range itemsPerGoroutine {
 				_ = batcher.Push(ctx, base+j)
 			}
 		}(i * itemsPerGoroutine)

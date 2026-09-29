@@ -45,6 +45,38 @@ func newIntegrationHarness(t *testing.T, topicSuffix string) (*cqrs.CQRSImpl[wid
 	return c, write, read, broker, broadcast, logs
 }
 
+// newBroadcastIntegrationHarness is newIntegrationHarness's counterpart for
+// the broadcast-delivery tests: same real Postgres + real Kafka wiring, but
+// BroadcastService is the real sockudo-backed implementation instead of the
+// fake, so a test can independently connect a real WebSocket subscriber and
+// confirm an event actually arrives, not just that Broadcast() was called.
+func newBroadcastIntegrationHarness(t *testing.T, topicSuffix string) (*cqrs.CQRSImpl[widget, widgetResource, any, string], *fakeSQLService, *fakeSQLService, *realKafkaBroker, string) {
+	t.Helper()
+	skipUnlessInfraReachable(t)
+
+	write := newPostgresSQLService(t, itWriteDSN)
+	read := newPostgresSQLService(t, itReadDSN)
+	topic := fmt.Sprintf("cqrs-it-%s-%d", topicSuffix, time.Now().UnixNano())
+	broker := newRealKafkaBroker(t, itKafkaAddr, topic)
+
+	c := cqrs.NewCQRS(cqrs.CQRSImpl[widget, widgetResource, any, string]{
+		Channel:              domains.Channel(topic),
+		WriteSQLService:      write,
+		ReadSQLService:       read,
+		MessageBrokerService: broker,
+		BroadcastService:     newRealPusherBroadcaster(),
+		ToResource:           widgetToResource,
+		Created:              func(*widget) domains.Events { return domains.Events{"widget.created"} },
+		Updated:              func(*widget) domains.Events { return domains.Events{"widget.updated"} },
+		Deleted:              func(*widget) domains.Events { return domains.Events{"widget.deleted"} },
+		BatchSize:            1,
+	})
+	// The Pusher channel and the Kafka topic are the same string here
+	// (both are just c.Channel) — that's this library's actual design
+	// (see Run and handleEvent), not a test simplification.
+	return c, write, read, broker, topic
+}
+
 // TestIntegration_HappyPath_RealPostgresWriteThenRealKafkaAlignsRealPostgresRead
 // is the actual end-to-end proof: Create() against real Postgres, an event
 // published to a real Kafka topic (standing in for what a Debezium ->
