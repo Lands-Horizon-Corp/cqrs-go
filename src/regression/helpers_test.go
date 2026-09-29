@@ -154,9 +154,10 @@ type broadcastCall struct {
 }
 
 type fakeBroadcastService struct {
-	mu     sync.Mutex
-	calls  []broadcastCall
-	notify chan struct{}
+	mu      sync.Mutex
+	calls   []broadcastCall
+	notify  chan struct{}
+	failErr error // when set, Broadcast returns this instead of recording success
 }
 
 func newFakeBroadcastService() *fakeBroadcastService {
@@ -165,13 +166,20 @@ func newFakeBroadcastService() *fakeBroadcastService {
 
 func (f *fakeBroadcastService) Broadcast(channels []domains.Channel, events domains.Events, payload any) error {
 	f.mu.Lock()
+	failErr := f.failErr
 	f.calls = append(f.calls, broadcastCall{channels: channels, events: events, payload: payload})
 	f.mu.Unlock()
 	select {
 	case f.notify <- struct{}{}:
 	default:
 	}
-	return nil
+	return failErr
+}
+
+func (f *fakeBroadcastService) setFailure(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failErr = err
 }
 
 func (f *fakeBroadcastService) snapshot() []broadcastCall {
@@ -351,4 +359,22 @@ func readWidgetFrom(t *testing.T, svc *fakeSQLService, id string) (widget, bool)
 		return widget{}, false
 	}
 	return got, true
+}
+
+// dropWidgetsTable and dropProcessedEventsTable let a test force a generic
+// SQL-level failure (distinct from ErrNoRows/validation) on a specific
+// table, to exercise the DB-error branches that a live constraint
+// violation would otherwise be needed for.
+func dropWidgetsTable(t *testing.T, svc *fakeSQLService) {
+	t.Helper()
+	if _, err := svc.db.NewDropTable().Model((*widget)(nil)).Exec(context.Background()); err != nil {
+		t.Fatalf("dropping widgets table: %v", err)
+	}
+}
+
+func dropProcessedEventsTable(t *testing.T, svc *fakeSQLService) {
+	t.Helper()
+	if _, err := svc.db.NewDropTable().Model((*domains.ProcessedEvent)(nil)).Exec(context.Background()); err != nil {
+		t.Fatalf("dropping processed_events table: %v", err)
+	}
 }

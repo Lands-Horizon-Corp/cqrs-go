@@ -124,6 +124,36 @@ func TestUpdateByID_SadPath_NonexistentIDAndValidation(t *testing.T) {
 			t.Errorf("expected row untouched after validation failure, got name %q", got.Name)
 		}
 	})
+
+	t.Run("DB Error Is Wrapped And Returned", func(t *testing.T) {
+		c, write := newTestCQRS(t)
+		ctx := context.Background()
+		seedWidget(t, c, widget{ID: "w1", Name: "n"})
+		dropWidgetsTable(t, write)
+
+		_, err := c.UpdateByID(ctx, "w1", widget{ID: "w1", Name: "n2"})
+		if err == nil {
+			t.Fatal("expected a DB error once the table is gone, got nil")
+		}
+	})
+}
+
+func TestUpdateByID_HappyPath_NilToResourceReturnsNilWithoutError(t *testing.T) {
+	write := newFakeSQLService(t)
+	c := newCQRSNoResource(t, write)
+	ctx := context.Background()
+	seedWidget(t, c, widget{ID: "w1", Name: "n"})
+
+	res, err := c.UpdateByID(ctx, "w1", widget{ID: "w1", Name: "n2"})
+	if err != nil {
+		t.Fatalf("UpdateByID returned error: %v", err)
+	}
+	if res != nil {
+		t.Errorf("expected nil resource when ToResource is unset, got %+v", res)
+	}
+	if got, ok := readWidgetFrom(t, write, "w1"); !ok || got.Name != "n2" {
+		t.Errorf("expected the update to still persist, got %q (found=%v)", got.Name, ok)
+	}
 }
 
 // TestUpdateByID_PoisonPill_ForgottenFieldsGetClobbered is the scenario

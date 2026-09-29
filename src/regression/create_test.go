@@ -203,3 +203,50 @@ func TestCreateMany_SadPath_EmptyInputIsANoOp(t *testing.T) {
 		t.Errorf("expected empty result, got %d entries", len(res))
 	}
 }
+
+func TestCreateMany_SadPath_ValidationFailureBlocksWholeBatch(t *testing.T) {
+	c, write := newTestCQRS(t)
+	ctx := context.Background()
+
+	// The second item is invalid; nothing in the batch should be inserted.
+	_, err := c.CreateMany(ctx, []widget{
+		{ID: "a", Name: "ok"},
+		{ID: "b", Name: ""}, // Name required
+	})
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+	count, err := write.db.NewSelect().Model((*widget)(nil)).Count(ctx)
+	if err != nil {
+		t.Fatalf("counting rows: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected no rows inserted after validation failure, got %d", count)
+	}
+}
+
+func TestCreateMany_SadPath_DBErrorOnDuplicateID(t *testing.T) {
+	c, _ := newTestCQRS(t)
+	ctx := context.Background()
+
+	_, err := c.CreateMany(ctx, []widget{
+		{ID: "dup", Name: "one"},
+		{ID: "dup", Name: "two"},
+	})
+	if err == nil {
+		t.Fatal("expected a DB error for duplicate primary keys in the same batch, got nil")
+	}
+}
+
+func TestCreateMany_HappyPath_NilToResourceReturnsNilResponses(t *testing.T) {
+	write := newFakeSQLService(t)
+	c := newCQRSNoResource(t, write)
+
+	res, err := c.CreateMany(context.Background(), []widget{{ID: "a", Name: "n"}})
+	if err != nil {
+		t.Fatalf("CreateMany returned error: %v", err)
+	}
+	if res != nil {
+		t.Errorf("expected nil responses when ToResource is unset, got %+v", res)
+	}
+}

@@ -52,6 +52,30 @@ func TestDeleteByID_SadPath_NonexistentIDReturnsErrNoRows(t *testing.T) {
 	}
 }
 
+func TestDeleteByID_SadPath_DBErrorIsWrapped(t *testing.T) {
+	c, write := newTestCQRS(t)
+	seedWidget(t, c, widget{ID: "w1", Name: "n"})
+	dropWidgetsTable(t, write)
+
+	err := c.DeleteByID(context.Background(), "w1")
+	if err == nil {
+		t.Fatal("expected a DB error once the table is gone, got nil")
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("expected a generic DB error, not ErrNoRows")
+	}
+}
+
+func TestDeleteMany_SadPath_DBErrorIsWrapped(t *testing.T) {
+	c, write := newTestCQRS(t)
+	seedWidget(t, c, widget{ID: "w1", Name: "n"})
+	dropWidgetsTable(t, write)
+
+	if err := c.DeleteMany(context.Background(), []string{"w1"}); err == nil {
+		t.Fatal("expected a DB error once the table is gone, got nil")
+	}
+}
+
 func TestDeleteMany_SadPath_EmptyInputIsANoOp(t *testing.T) {
 	c, write := newTestCQRS(t)
 	ctx := context.Background()

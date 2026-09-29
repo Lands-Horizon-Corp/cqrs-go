@@ -335,6 +335,90 @@ func TestBatcher_SadPath_WorkerContextCancelled(t *testing.T) {
 	t.Errorf("expected drained batch %v on context cancellation, got %v", expected, received)
 }
 
+// TestBatcher_HappyPath_ShutdownDrainFlushesMultipleSizeBatches covers the
+// branch of the ctx-cancellation drain loop that flushes mid-drain once
+// the buffer reaches BatchSize again (as opposed to the final flush that
+// happens once the channel is empty). To hit it deterministically, the
+// handler blocks on the first call until the test has queued up enough
+// items that more than one BatchSize-sized chunk is still sitting in the
+// channel by the time cancellation is observed.
+func TestBatcher_HappyPath_ShutdownDrainFlushesMultipleSizeBatches(t *testing.T) {
+	var (
+		mu          sync.Mutex
+		received    [][]int
+		flushCount  int
+		unblockOnce sync.Once
+	)
+	unblock := make(chan struct{})
+	firstCallStarted := make(chan struct{})
+
+	handler := func(_ context.Context, batch []int) error {
+		mu.Lock()
+		received = append(received, append([]int(nil), batch...))
+		flushCount++
+		first := flushCount == 1
+		mu.Unlock()
+
+		if first {
+			close(firstCallStarted)
+			<-unblock // hold the worker goroutine here while we queue more items
+		}
+		return nil
+	}
+
+	cfg := utils.BatcherConfig[int]{
+		BatchSize:     2,
+		FlushInterval: time.Hour,
+		BufferCap:     100,
+		Handler:       handler,
+	}
+	batcher := utils.NewBatcher(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	batcher.Start(ctx)
+
+	// Triggers the first (blocking) flush via the normal size-triggered path.
+	_ = batcher.Push(ctx, 1)
+	_ = batcher.Push(ctx, 2)
+	<-firstCallStarted
+
+	// While the worker is stuck inside that first Handler call, queue up
+	// enough items that, once cancellation is observed, the drain loop has
+	// to flush more than once before it empties the channel.
+	for _, v := range []int{3, 4, 5, 6, 7} {
+		_ = batcher.Push(ctx, v)
+	}
+	cancel()
+	unblockOnce.Do(func() { close(unblock) })
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		total := 0
+		for _, b := range received {
+			total += len(b)
+		}
+		done := total == 7
+		mu.Unlock()
+		if done {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	total := 0
+	for _, b := range received {
+		total += len(b)
+	}
+	if total != 7 {
+		t.Fatalf("expected all 7 pushed items to be flushed eventually, got %d across batches %v", total, received)
+	}
+	if flushCount < 3 {
+		t.Errorf("expected at least 3 separate flushes (1 blocking + multiple drain flushes), got %d: %v", flushCount, received)
+	}
+}
+
 type Message struct {
 	ID       int
 	IsPoison bool

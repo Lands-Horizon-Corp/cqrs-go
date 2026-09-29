@@ -14,6 +14,7 @@ type fieldsTestEntity struct {
 	Skipped   string `bun:"-"`
 	secret    string `bun:"secret"` //nolint:unused // exercised via reflection in poison pill test
 	SecretPtr *string
+	Tags      []string
 }
 
 func TestBunColumnFieldIndex_HappyPath_ResolvesMatchingColumn(t *testing.T) {
@@ -135,5 +136,21 @@ func TestFieldValueAt_PoisonPill_NilPointerFieldIsAbsentNotTheStringNil(t *testi
 	entity.SecretPtr = &val
 	if got := utils.FieldValueAt(&entity, idx); got != "not nil" {
 		t.Errorf("expected dereferenced value %q, got %q", "not nil", got)
+	}
+}
+
+// TestFieldValueAt_PoisonPill_NilSliceFieldIsAbsentNotTheStringNil covers
+// the Slice/Map/Chan/Func branch of formatFieldValue: a nil slice must
+// resolve to "", not "[]" or the literal text "<nil>".
+func TestFieldValueAt_PoisonPill_NilSliceFieldIsAbsentNotTheStringNil(t *testing.T) {
+	entity := fieldsTestEntity{ID: "x", Tags: nil}
+	idx := 7 // Tags' field index
+	if got := utils.FieldValueAt(&entity, idx); got != "" {
+		t.Errorf(`expected "" for a nil slice field, got %q`, got)
+	}
+
+	entity.Tags = []string{"a", "b"}
+	if got := utils.FieldValueAt(&entity, idx); got == "" {
+		t.Error("expected a non-empty formatted value for a non-nil slice")
 	}
 }

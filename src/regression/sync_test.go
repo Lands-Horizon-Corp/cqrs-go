@@ -2,11 +2,15 @@ package regression
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/sqlitedialect"
 
+	"github.com/Lands-Horizon-Corp/cqrs-go/src/cqrs"
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
 )
 
@@ -207,6 +211,186 @@ func TestSync_SadPath_DeleteEventForRowNotInReadDBIsSafeNoOp(t *testing.T) {
 
 	cancel()
 	h.waitForRunToStop(t, done, 2*time.Second)
+}
+
+// TestSync_HappyPath_DuplicateEventIDIsAppliedOnce covers Kafka/Debezium
+// at-least-once redelivery: the same EventID arriving twice must be
+// applied to the read db, and broadcast, exactly once.
+func TestSync_HappyPath_DuplicateEventIDIsAppliedOnce(t *testing.T) {
+	h := newCDCHarness(t, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := h.runInBackground(ctx)
+
+	w := widget{ID: "w1", Name: "n"}
+	emitFor(t, h, "evt-1", domains.ChangeTypeCreated, w)
+	h.broadcast.waitForCall(t, 2*time.Second)
+
+	// Redelivery of the exact same event.
+	emitFor(t, h, "evt-1", domains.ChangeTypeCreated, w)
+
+	select {
+	case <-h.broadcast.notify:
+		t.Fatal("expected no second broadcast for a duplicate EventID")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	if calls := h.broadcast.snapshot(); len(calls) != 1 {
+		t.Fatalf("expected exactly 1 broadcast total, got %d", len(calls))
+	}
+
+	cancel()
+	h.waitForRunToStop(t, done, 2*time.Second)
+}
+
+// conventionIDWidget has no explicit `bun` column name on its PK field —
+// bun resolves the "id" column via its naming convention from the Go field
+// name ID, but utils.BunColumnFieldIndex only ever looks at explicit `bun`
+// tags, so it can't resolve this field. This is the realistic way the
+// entity-coalescing key falls back to EventID in production: the SQL
+// conflict target ("id") still exists and the upsert succeeds fine, it's
+// only the Go-side tag lookup that comes up empty.
+type conventionIDWidget struct {
+	bun.BaseModel `bun:"table:convention_widgets"`
+	ID            string `bun:",pk"`
+	Name          string
+}
+
+func TestSync_HappyPath_EntityKeyFallsBackToEventIDWhenColumnUnresolved(t *testing.T) {
+	sqldb, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("opening sqlite: %v", err)
+	}
+	sqldb.SetMaxOpenConns(1)
+	db := bun.NewDB(sqldb, sqlitedialect.New())
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.NewCreateTable().Model((*conventionIDWidget)(nil)).Exec(context.Background()); err != nil {
+		t.Fatalf("creating table: %v", err)
+	}
+	if _, err := db.NewCreateTable().Model((*domains.ProcessedEvent)(nil)).Exec(context.Background()); err != nil {
+		t.Fatalf("creating processed_events table: %v", err)
+	}
+	svc := &fakeSQLService{db: db}
+
+	broadcast := newFakeBroadcastService()
+	broker := newFakeMessageBroker()
+
+	c := cqrs.NewCQRS(cqrs.CQRSImpl[conventionIDWidget, conventionIDWidget, any, string]{
+		Channel:              "conv",
+		ColumnDefaultID:      "id",
+		WriteSQLService:      svc,
+		ReadSQLService:       svc,
+		MessageBrokerService: broker,
+		BroadcastService:     broadcast,
+		ToResource:           func(w *conventionIDWidget) *conventionIDWidget { return w },
+		Created:              func(*conventionIDWidget) domains.Events { return domains.Events{"created"} },
+		BatchSize:            1,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- c.Run(ctx) }()
+
+	envelope, err := sonic.Marshal(domains.CQRSQueuePayload[conventionIDWidget]{
+		EventID:    "evt-1",
+		ChangeType: domains.ChangeTypeCreated,
+		Payload:    conventionIDWidget{ID: "w1", Name: "n"},
+	})
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	broker.Emit(t, []byte("w1"), envelope)
+	broadcast.waitForCall(t, 2*time.Second)
+
+	var got conventionIDWidget
+	if err := db.NewSelect().Model(&got).Where("id = ?", "w1").Scan(context.Background()); err != nil {
+		t.Errorf("expected the row to still be applied via the EventID fallback key: %v", err)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after context cancellation")
+	}
+}
+
+// The next three tests force a real SQL failure at each of the three
+// statements inside syncBatchToReadDB's transaction, by dropping the
+// table each statement depends on before the event is applied.
+
+func TestSync_SadPath_ProcessedEventsInsertFailureIsReportedViaOnError(t *testing.T) {
+	h := newCDCHarness(t, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := h.runInBackground(ctx)
+
+	dropProcessedEventsTable(t, h.read)
+	emitFor(t, h, "evt-1", domains.ChangeTypeCreated, widget{ID: "w1", Name: "n"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, c := range h.logs.snapshot() {
+			if c.level == "error" {
+				cancel()
+				h.waitForRunToStop(t, done, 2*time.Second)
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("expected the processed_events insert failure to be logged via Batcher's OnError")
+}
+
+func TestSync_SadPath_UpsertFailureIsReportedViaOnError(t *testing.T) {
+	h := newCDCHarness(t, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := h.runInBackground(ctx)
+
+	dropWidgetsTable(t, h.read)
+	// Created -> goes into upsertEntities, not deleteEntities.
+	emitFor(t, h, "evt-1", domains.ChangeTypeCreated, widget{ID: "w1", Name: "n"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, c := range h.logs.snapshot() {
+			if c.level == "error" {
+				cancel()
+				h.waitForRunToStop(t, done, 2*time.Second)
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("expected the upsert failure to be logged via Batcher's OnError")
+}
+
+func TestSync_SadPath_DeleteFailureIsReportedViaOnError(t *testing.T) {
+	h := newCDCHarness(t, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := h.runInBackground(ctx)
+
+	dropWidgetsTable(t, h.read)
+	// Deleted -> goes into deleteEntities, not upsertEntities, so this
+	// specifically exercises the delete statement's own error branch.
+	emitFor(t, h, "evt-1", domains.ChangeTypeDeleted, widget{ID: "w1", Name: "n"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, c := range h.logs.snapshot() {
+			if c.level == "error" {
+				cancel()
+				h.waitForRunToStop(t, done, 2*time.Second)
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("expected the delete failure to be logged via Batcher's OnError")
 }
 
 // TestSync_PoisonPill_ComplexDataWithMixedNilsAligns exercises the "even in
