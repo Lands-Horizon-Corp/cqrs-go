@@ -1,0 +1,209 @@
+package cqrs
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
+	"github.com/Lands-Horizon-Corp/cqrs-go/src/utils"
+	"github.com/bytedance/sonic"
+	"github.com/uptrace/bun"
+)
+
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Run(ctx context.Context) error {
+	if c.WriteSQLService.Ping(ctx) != nil {
+		panic("WriteSQLService is not reachable")
+	}
+	if c.ReadSQLService != nil {
+		if c.ReadSQLService.Ping(ctx) != nil {
+			panic("ReadSQLService is not reachable")
+		}
+	}
+	if c.MessageBrokerService == nil {
+		return errors.New("message broker service is not initialized")
+	}
+	c.info(ctx, fmt.Sprintf("starting outbox batch runner for channel: %s", c.Channel))
+	batcher := utils.NewBatcher(utils.BatcherConfig[domains.CQRSQueuePayload[TData]]{
+		BatchSize:     c.batchSize,
+		FlushInterval: c.flushInterval,
+		Handler: func(batchCtx context.Context, batch []domains.CQRSQueuePayload[TData]) error {
+			return c.processBatch(batchCtx, batch)
+		},
+		OnError: func(err error, batch []domains.CQRSQueuePayload[TData]) {
+			c.error(ctx, fmt.Sprintf("processing outbox batch for channel %s failed: %v", c.Channel, err))
+		},
+	})
+	batcher.Start(ctx)
+	defer batcher.Stop()
+
+	return c.MessageBrokerService.Subscribe(ctx, string(c.Channel), func(key, value []byte) error {
+		var env domains.CQRSQueuePayload[TData]
+		if err := sonic.Unmarshal(value, &env); err != nil {
+			c.error(ctx, fmt.Sprintf("unmarshaling message payload for channel %s: %v", c.Channel, err))
+			return nil
+		}
+		if env.EventID == "" {
+			if len(key) > 0 {
+				env.EventID = string(key)
+			} else {
+				env.EventID = fmt.Sprintf("%s-%d", c.Channel, time.Now().UnixNano())
+			}
+		}
+		return batcher.Push(ctx, env)
+	})
+}
+
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) processBatch(
+	ctx context.Context,
+	batch []domains.CQRSQueuePayload[TData],
+) error {
+	if len(batch) == 0 {
+		return nil
+	}
+	appliedMessages, err := c.syncBatchToReadDB(ctx, batch)
+	if err != nil {
+		return fmt.Errorf("synchronizing batch to read db: %w", err)
+	}
+	for i := range appliedMessages {
+		msg := &appliedMessages[i]
+		switch msg.ChangeType {
+		case domains.ChangeTypeCreated:
+			c.OnCreated(ctx, &msg.Payload)
+		case domains.ChangeTypeUpdated:
+			c.OnUpdated(ctx, &msg.Payload)
+		case domains.ChangeTypeDeleted:
+			c.OnDeleted(ctx, &msg.Payload)
+		default:
+			c.handleEvent(ctx, msg.ChangeType, &msg.Payload, nil)
+		}
+	}
+	return nil
+}
+
+func (r *CQRSImpl[TData, TResponse, TRequest, TID]) syncBatchToReadDB(
+	ctx context.Context,
+	batch []domains.CQRSQueuePayload[TData],
+) ([]domains.CQRSQueuePayload[TData], error) {
+	if r.ReadSQLService == nil {
+		return nil, errors.New("read db is not initialized")
+	}
+	eventIDsPtr := r.stringSlicePool.Get()
+	defer r.stringSlicePool.Put(eventIDsPtr)
+
+	seenInBatch := r.stringSetPool.Get()
+	defer r.stringSetPool.Put(seenInBatch)
+
+	existingIDsPtr := r.stringSlicePool.Get()
+	defer r.stringSlicePool.Put(existingIDsPtr)
+
+	existingMap := r.stringSetPool.Get()
+	defer r.stringSetPool.Put(existingMap)
+
+	eventsToInsertPtr := r.processedEventsPool.Get()
+	defer r.processedEventsPool.Put(eventsToInsertPtr)
+
+	eventIDs := *eventIDsPtr
+	uniqueBatch := make([]domains.CQRSQueuePayload[TData], 0, len(batch))
+
+	for _, msg := range batch {
+		if !seenInBatch[msg.EventID] {
+			seenInBatch[msg.EventID] = true
+			eventIDs = append(eventIDs, msg.EventID)
+			uniqueBatch = append(uniqueBatch, msg)
+		}
+	}
+	*eventIDsPtr = eventIDs
+
+	if len(uniqueBatch) == 0 {
+		return nil, nil
+	}
+
+	err := r.ReadSQLService.Client().NewSelect().
+		Model((*domains.ProcessedEvent)(nil)).
+		Column("event_id").
+		Where("event_id IN (?)", bun.In(*eventIDsPtr)).
+		Scan(ctx, existingIDsPtr)
+	if err != nil {
+		return nil, fmt.Errorf("querying existing event ids: %w", err)
+	}
+
+	for _, id := range *existingIDsPtr {
+		existingMap[id] = true
+	}
+	newMessages := make([]domains.CQRSQueuePayload[TData], 0, len(uniqueBatch))
+	eventsToInsert := *eventsToInsertPtr
+	latestEntityState := make(map[string]domains.CQRSQueuePayload[TData], len(uniqueBatch))
+	entityOrder := make([]string, 0, len(uniqueBatch))
+	now := time.Now()
+
+	for _, msg := range uniqueBatch {
+		if existingMap[msg.EventID] {
+			continue
+		}
+		newMessages = append(newMessages, msg)
+		eventsToInsert = append(eventsToInsert, domains.ProcessedEvent{
+			EventID:   msg.EventID,
+			Channel:   string(r.Channel),
+			CreatedAt: now,
+		})
+		key := utils.FieldValueAt(&msg.Payload, r.idFieldIndex)
+		if key == "" {
+			key = msg.EventID
+		}
+		if _, exists := latestEntityState[key]; !exists {
+			entityOrder = append(entityOrder, key)
+		}
+		latestEntityState[key] = msg
+	}
+	*eventsToInsertPtr = eventsToInsert
+	if len(newMessages) == 0 {
+		return nil, nil
+	}
+
+	upsertEntities := make([]TData, 0, len(entityOrder))
+	deleteEntities := make([]TData, 0, len(entityOrder))
+	for _, key := range entityOrder {
+		msg := latestEntityState[key]
+		switch msg.ChangeType {
+		case domains.ChangeTypeCreated, domains.ChangeTypeUpdated:
+			upsertEntities = append(upsertEntities, msg.Payload)
+		case domains.ChangeTypeDeleted:
+			deleteEntities = append(deleteEntities, msg.Payload)
+		}
+	}
+	err = r.ReadSQLService.Client().RunInTx(ctx, &sql.TxOptions{}, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewInsert().
+			Model(eventsToInsertPtr).
+			Ignore().
+			Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("bulk inserting processed events: %w", err)
+		}
+		if len(upsertEntities) > 0 {
+			_, err = tx.NewInsert().
+				Model(&upsertEntities).
+				On(fmt.Sprintf("CONFLICT (%s) DO UPDATE", r.ColumnDefaultID)).
+				Exec(ctx)
+			if err != nil {
+				return fmt.Errorf("bulk upserting entities to read db: %w", err)
+			}
+		}
+		if len(deleteEntities) > 0 {
+			_, err = tx.NewDelete().
+				Model(&deleteEntities).
+				WherePK().
+				Exec(ctx)
+			if err != nil {
+				return fmt.Errorf("bulk deleting entities from read db: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return newMessages, nil
+}

@@ -30,6 +30,7 @@ func (p *BufferPool[T]) Put(buf *[]T) {
 	if cap(*buf) > 10000 {
 		return
 	}
+	clear(*buf) // drop element references so the pooled buffer doesn't pin memory
 	*buf = (*buf)[:0]
 	p.pool.Put(buf)
 }
@@ -49,9 +50,7 @@ func NewMapPool[K comparable, V any]() *MapPool[K, V] {
 }
 
 func (p *MapPool[K, V]) Get() map[K]V {
-	m := p.pool.Get().(map[K]V)
-	clear(m) // O(1) clearing in Go 1.21+
-	return m
+	return p.pool.Get().(map[K]V)
 }
 
 func (p *MapPool[K, V]) Put(m map[K]V) {

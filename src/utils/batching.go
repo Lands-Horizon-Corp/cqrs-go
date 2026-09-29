@@ -66,14 +66,15 @@ func (b *Batcher[T]) worker(ctx context.Context) {
 	ticker := time.NewTicker(b.cfg.FlushInterval)
 	defer ticker.Stop()
 
-	// Helper to flush buffer using a given context
+	// Helper to flush buffer using a given context.
+	// Handler runs synchronously here, so we can hand off the buffer directly
+	// instead of copying it, and just allocate a fresh one for the next batch.
 	flushWithCtx := func(execCtx context.Context) {
 		if len(buffer) == 0 {
 			return
 		}
-		batchToProcess := make([]T, len(buffer))
-		copy(batchToProcess, buffer)
-		buffer = buffer[:0]
+		batchToProcess := buffer
+		buffer = make([]T, 0, b.cfg.BatchSize)
 
 		if err := b.cfg.Handler(execCtx, batchToProcess); err != nil {
 			if b.cfg.OnError != nil {

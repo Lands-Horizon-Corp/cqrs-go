@@ -1,4 +1,4 @@
-package repository
+package cqrs
 
 import (
 	"context"
@@ -7,17 +7,17 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) Create(
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Create(
 	ctx context.Context,
 	data TData,
 ) (*TResponse, error) {
-	if r.Validator != nil {
-		if err := r.Validator.StructCtx(ctx, &data); err != nil {
+	if c.Validator != nil {
+		if err := c.Validator.StructCtx(ctx, &data); err != nil {
 			return nil, fmt.Errorf("validating request payload: %w", err)
 		}
 	}
 
-	_, err := r.WriteDB.NewInsert().
+	_, err := c.WriteSQLService.Client().NewInsert().
 		Model(&data).
 		Returning("*").
 		Exec(ctx)
@@ -25,13 +25,13 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) Create(
 		return nil, fmt.Errorf("inserting record: %w", err)
 	}
 
-	if r.ToResource != nil {
-		return r.ToResource(&data), nil
+	if c.ToResource != nil {
+		return c.ToResource(&data), nil
 	}
 	return nil, nil
 }
 
-func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) CreateMany(
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) CreateMany(
 	ctx context.Context,
 	data []TData,
 ) ([]*TResponse, error) {
@@ -39,15 +39,15 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) CreateMany(
 		return []*TResponse{}, nil
 	}
 
-	if r.Validator != nil {
+	if c.Validator != nil {
 		for i := range data {
-			if err := r.Validator.StructCtx(ctx, &data[i]); err != nil {
+			if err := c.Validator.StructCtx(ctx, &data[i]); err != nil {
 				return nil, fmt.Errorf("validating request payload at index %d: %w", i, err)
 			}
 		}
 	}
 
-	_, err := r.WriteDB.NewInsert().
+	_, err := c.WriteSQLService.Client().NewInsert().
 		Model(&data).
 		Returning("*").
 		Exec(ctx)
@@ -55,26 +55,26 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) CreateMany(
 		return nil, fmt.Errorf("bulk inserting records: %w", err)
 	}
 
-	if r.ToResource == nil {
+	if c.ToResource == nil {
 		return nil, nil
 	}
 
 	responses := make([]*TResponse, 0, len(data))
 	for i := range data {
-		if res := r.ToResource(&data[i]); res != nil {
+		if res := c.ToResource(&data[i]); res != nil {
 			responses = append(responses, res)
 		}
 	}
 	return responses, nil
 }
 
-func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) CreateWithTx(
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) CreateWithTx(
 	ctx context.Context,
 	tx bun.Tx,
 	data TData,
 ) (*TResponse, error) {
-	if r.Validator != nil {
-		if err := r.Validator.StructCtx(ctx, &data); err != nil {
+	if c.Validator != nil {
+		if err := c.Validator.StructCtx(ctx, &data); err != nil {
 			return nil, fmt.Errorf("validating request payload: %w", err)
 		}
 	}
@@ -86,14 +86,13 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) CreateWithTx(
 	if err != nil {
 		return nil, fmt.Errorf("inserting record: %w", err)
 	}
-
-	if r.ToResource != nil {
-		return r.ToResource(&data), nil
+	if c.ToResource != nil {
+		return c.ToResource(&data), nil
 	}
 	return nil, nil
 }
 
-func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) CreateManyWithTx(
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) CreateManyWithTx(
 	ctx context.Context,
 	tx bun.Tx,
 	data []TData,
@@ -101,9 +100,9 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) CreateManyWithTx(
 	if len(data) == 0 {
 		return []*TResponse{}, nil
 	}
-	if r.Validator != nil {
+	if c.Validator != nil {
 		for i := range data {
-			if err := r.Validator.StructCtx(ctx, &data[i]); err != nil {
+			if err := c.Validator.StructCtx(ctx, &data[i]); err != nil {
 				return nil, fmt.Errorf("validating request payload at index %d: %w", i, err)
 			}
 		}
@@ -115,12 +114,12 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) CreateManyWithTx(
 	if err != nil {
 		return nil, fmt.Errorf("bulk inserting records in tx: %w", err)
 	}
-	if r.ToResource == nil {
+	if c.ToResource == nil {
 		return nil, nil
 	}
 	responses := make([]*TResponse, 0, len(data))
 	for i := range data {
-		if res := r.ToResource(&data[i]); res != nil {
+		if res := c.ToResource(&data[i]); res != nil {
 			responses = append(responses, res)
 		}
 	}

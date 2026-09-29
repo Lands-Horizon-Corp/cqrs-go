@@ -1,4 +1,4 @@
-package repository
+package cqrs
 
 import (
 	"context"
@@ -8,13 +8,13 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) DeleteByID(
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) DeleteByID(
 	ctx context.Context,
 	id TID,
 ) error {
-	res, err := r.WriteDB.NewDelete().
+	res, err := c.WriteSQLService.Client().NewDelete().
 		Model((*TData)(nil)).
-		Where("? = ?", bun.Ident(r.ColumnDefaultID), id).
+		Where("? = ?", bun.Ident(c.ColumnDefaultID), id).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("deleting record: %w", err)
@@ -26,14 +26,14 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) DeleteByID(
 	return nil
 }
 
-func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) DeleteByIDWithTx(
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) DeleteByIDWithTx(
 	ctx context.Context,
 	tx bun.Tx,
 	id TID,
 ) error {
 	res, err := tx.NewDelete().
 		Model((*TData)(nil)).
-		Where("? = ?", bun.Ident(r.ColumnDefaultID), id).
+		Where("? = ?", bun.Ident(c.ColumnDefaultID), id).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("deleting record in tx: %w", err)
@@ -45,16 +45,16 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) DeleteByIDWithTx(
 	return nil
 }
 
-func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) DeleteMany(
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) DeleteMany(
 	ctx context.Context,
 	ids []TID,
 ) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	_, err := r.WriteDB.NewDelete().
+	_, err := c.WriteSQLService.Client().NewDelete().
 		Model((*TData)(nil)).
-		Where("? IN (?)", bun.Ident(r.ColumnDefaultID), bun.In(ids)).
+		Where("? IN (?)", bun.Ident(c.ColumnDefaultID), bun.In(ids)).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("bulk deleting records: %w", err)
@@ -62,7 +62,7 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) DeleteMany(
 	return nil
 }
 
-func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) DeleteManyWithTx(
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) DeleteManyWithTx(
 	ctx context.Context,
 	tx bun.Tx,
 	ids []TID,
@@ -72,7 +72,7 @@ func (r *RepositoryImpl[TData, TResponse, TRequest, TID]) DeleteManyWithTx(
 	}
 	_, err := tx.NewDelete().
 		Model((*TData)(nil)).
-		Where("? IN (?)", bun.Ident(r.ColumnDefaultID), bun.In(ids)).
+		Where("? IN (?)", bun.Ident(c.ColumnDefaultID), bun.In(ids)).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("bulk deleting records in tx: %w", err)
