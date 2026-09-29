@@ -78,22 +78,26 @@ only understands its own `{event_id, change_type, payload}` shape
 (`domains.CQRSQueuePayload`), so it can't consume the connector's raw topic
 (`cqrs.public.<table>`) directly.
 
-The bridge between them is `src/debezium`:
-- `debezium.Transform[T]` turns one raw Debezium record into
-  `domains.CQRSQueuePayload[T]` — captured and verified against this
+This library ships no adapter for that bridge — `domains.MessageBrokerService`
+is a plain interface, and this project deliberately doesn't bundle a
+Debezium-specific implementation (see `docs/README.md`'s "Bringing your own
+adapters"). A real, tested example of the bridge exists as test-only code in
+`src/regression` (not something to import):
+- `transformDebezium[T]` (`debezium_test.go`) turns one raw Debezium record
+  into `domains.CQRSQueuePayload[T]` — captured and verified against this
   connector's real live output, including the caveat that a delete
   record's `before` only reliably carries the primary key under the
-  default `REPLICA IDENTITY` (see the package doc for why that's fine for
-  this library's own needs).
-- `debezium.RunBridge` wires a source topic (the connector's raw output)
-  through `Transform` to a destination topic (whatever `Run`'s `Channel`
-  is actually subscribed to).
+  default `REPLICA IDENTITY` (fine for this library's own needs, since a
+  delete only needs the PK to remove the right row).
+- `runDebeziumBridge` (`integration_debezium_test.go`) wires a source topic
+  (the connector's raw output) through `transformDebezium` to a destination
+  topic (whatever `Run`'s `Channel` is actually subscribed to).
 
 `src/regression/integration_debezium_test.go`
 (`TestIntegration_HappyPath_RealDebeziumThroughBridgeAlignsRealPostgresRead`)
 proves the full chain end to end against this exact stack: a real write to
 `postgres-write`, captured for real by this connector, transformed by
-`RunBridge`, consumed by a real `CQRSImpl.Run`, landing in `postgres-read`
+`runDebeziumBridge`, consumed by a real `CQRSImpl.Run`, landing in `postgres-read`
 — no hand-built envelope anywhere in that path. Run it with
 `go test -tags=integration ./src/regression/... -run TestIntegration_HappyPath_RealDebeziumThroughBridgeAlignsRealPostgresRead -v`.
 
