@@ -47,8 +47,28 @@ func FieldValueAt[TData any](data *TData, idx int) string {
 	if !f.CanInterface() {
 		return ""
 	}
-	if f.Kind() == reflect.String {
+	return formatFieldValue(f)
+}
+
+// formatFieldValue turns a struct field's reflect.Value into a string,
+// treating a nil pointer/interface/slice/map/chan/func as an absent value
+// ("") rather than the literal text "<nil>", and dereferencing a non-nil
+// pointer/interface instead of stringifying the pointer itself — fmt's
+// default %v formatting only auto-dereferences pointers to struct/slice/
+// map, so a *string or *bool would otherwise print as a hex address.
+func formatFieldValue(f reflect.Value) string {
+	switch f.Kind() {
+	case reflect.String:
 		return f.String()
+	case reflect.Pointer, reflect.Interface:
+		if f.IsNil() {
+			return ""
+		}
+		return formatFieldValue(f.Elem())
+	case reflect.Slice, reflect.Map, reflect.Chan, reflect.Func:
+		if f.IsNil() {
+			return ""
+		}
 	}
 	return fmt.Sprintf("%v", f.Interface())
 }

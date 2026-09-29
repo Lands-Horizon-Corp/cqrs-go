@@ -1,14 +1,16 @@
-package utils
+package regression
 
 import (
 	"fmt"
 	"runtime"
 	"sync"
 	"testing"
+
+	"github.com/Lands-Horizon-Corp/cqrs-go/src/utils"
 )
 
 func TestBufferPool_HappyPath_GetAndPut(t *testing.T) {
-	pool := NewBufferPool[int]()
+	pool := utils.NewBufferPool[int]()
 	buf := pool.Get()
 	if buf == nil {
 		t.Fatal("expected non-nil buffer from Get")
@@ -32,7 +34,7 @@ func TestBufferPool_HappyPath_GetAndPut(t *testing.T) {
 }
 
 func TestBufferPool_SadPath_NilAndOversized(t *testing.T) {
-	pool := NewBufferPool[byte]()
+	pool := utils.NewBufferPool[byte]()
 
 	t.Run("Nil Put", func(t *testing.T) {
 		// Should not panic
@@ -60,7 +62,7 @@ func TestBufferPool_PoisonPill_DataIsolation(t *testing.T) {
 		IsPoison  bool
 	}
 
-	pool := NewBufferPool[SensitiveData]()
+	pool := utils.NewBufferPool[SensitiveData]()
 	buf1 := pool.Get()
 	*buf1 = append(*buf1, SensitiveData{
 		SecretKey: "MALICIOUS_POISON_PAYLOAD",
@@ -78,7 +80,7 @@ func TestBufferPool_PoisonPill_DataIsolation(t *testing.T) {
 }
 
 func TestBufferPool_ConcurrentStress(t *testing.T) {
-	pool := NewBufferPool[int]()
+	pool := utils.NewBufferPool[int]()
 	var wg sync.WaitGroup
 
 	workers := 50
@@ -110,7 +112,7 @@ func TestBufferPool_ConcurrentStress(t *testing.T) {
 // --- MapPool Tests ---
 
 func TestMapPool_HappyPath_GetAndPut(t *testing.T) {
-	pool := NewMapPool[string, int]()
+	pool := utils.NewMapPool[string, int]()
 
 	m := pool.Get()
 	if m == nil {
@@ -135,7 +137,7 @@ func TestMapPool_HappyPath_GetAndPut(t *testing.T) {
 }
 
 func TestMapPool_SadPath_NilAndOversized(t *testing.T) {
-	pool := NewMapPool[int, string]()
+	pool := utils.NewMapPool[int, string]()
 
 	t.Run("Nil Put", func(t *testing.T) {
 		// Should not panic
@@ -157,7 +159,7 @@ func TestMapPool_SadPath_NilAndOversized(t *testing.T) {
 }
 
 func TestMapPool_PoisonPill_KeyLeakPrevention(t *testing.T) {
-	pool := NewMapPool[string, any]()
+	pool := utils.NewMapPool[string, any]()
 
 	m1 := pool.Get()
 
@@ -179,7 +181,7 @@ func TestMapPool_PoisonPill_KeyLeakPrevention(t *testing.T) {
 }
 
 func TestMapPool_ConcurrentStress(t *testing.T) {
-	pool := NewMapPool[string, int]()
+	pool := utils.NewMapPool[string, int]()
 	var wg sync.WaitGroup
 	workers := 50
 	iterations := 500

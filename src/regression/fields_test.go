@@ -1,6 +1,10 @@
-package utils
+package regression
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Lands-Horizon-Corp/cqrs-go/src/utils"
+)
 
 type fieldsTestEntity struct {
 	ID        string `bun:"id,pk"`
@@ -13,12 +17,12 @@ type fieldsTestEntity struct {
 }
 
 func TestBunColumnFieldIndex_HappyPath_ResolvesMatchingColumn(t *testing.T) {
-	idx := BunColumnFieldIndex[fieldsTestEntity]("id")
+	idx := utils.BunColumnFieldIndex[fieldsTestEntity]("id")
 	if idx != 0 {
 		t.Fatalf("expected index 0 for column 'id', got %d", idx)
 	}
 
-	idx = BunColumnFieldIndex[fieldsTestEntity]("age")
+	idx = utils.BunColumnFieldIndex[fieldsTestEntity]("age")
 	if idx != 2 {
 		t.Fatalf("expected index 2 for column 'age', got %d", idx)
 	}
@@ -27,41 +31,41 @@ func TestBunColumnFieldIndex_HappyPath_ResolvesMatchingColumn(t *testing.T) {
 func TestFieldValueAt_HappyPath_ReadsStringAndNonString(t *testing.T) {
 	entity := fieldsTestEntity{ID: "abc-123", Name: "widget", Age: 7}
 
-	idIdx := BunColumnFieldIndex[fieldsTestEntity]("id")
-	if got := FieldValueAt(&entity, idIdx); got != "abc-123" {
+	idIdx := utils.BunColumnFieldIndex[fieldsTestEntity]("id")
+	if got := utils.FieldValueAt(&entity, idIdx); got != "abc-123" {
 		t.Errorf("expected 'abc-123', got %q", got)
 	}
 
-	ageIdx := BunColumnFieldIndex[fieldsTestEntity]("age")
-	if got := FieldValueAt(&entity, ageIdx); got != "7" {
+	ageIdx := utils.BunColumnFieldIndex[fieldsTestEntity]("age")
+	if got := utils.FieldValueAt(&entity, ageIdx); got != "7" {
 		t.Errorf("expected '7', got %q", got)
 	}
 }
 
 func TestBunColumnFieldIndex_SadPath_NoMatchOrNotStruct(t *testing.T) {
 	t.Run("Unknown Column", func(t *testing.T) {
-		idx := BunColumnFieldIndex[fieldsTestEntity]("does_not_exist")
+		idx := utils.BunColumnFieldIndex[fieldsTestEntity]("does_not_exist")
 		if idx != -1 {
 			t.Errorf("expected -1 for unknown column, got %d", idx)
 		}
 	})
 
 	t.Run("Untagged Field Never Matches", func(t *testing.T) {
-		idx := BunColumnFieldIndex[fieldsTestEntity]("")
+		idx := utils.BunColumnFieldIndex[fieldsTestEntity]("")
 		if idx != -1 {
 			t.Errorf("expected -1 for empty column against untagged/dash fields, got %d", idx)
 		}
 	})
 
 	t.Run("Explicitly Dashed Tag Skipped", func(t *testing.T) {
-		idx := BunColumnFieldIndex[fieldsTestEntity]("-")
+		idx := utils.BunColumnFieldIndex[fieldsTestEntity]("-")
 		if idx != -1 {
 			t.Errorf("expected -1, '-' tags must be treated as untagged, got %d", idx)
 		}
 	})
 
 	t.Run("Non-Struct Type Parameter", func(t *testing.T) {
-		idx := BunColumnFieldIndex[string]("id")
+		idx := utils.BunColumnFieldIndex[string]("id")
 		if idx != -1 {
 			t.Errorf("expected -1 for non-struct type parameter, got %d", idx)
 		}
@@ -70,21 +74,21 @@ func TestBunColumnFieldIndex_SadPath_NoMatchOrNotStruct(t *testing.T) {
 
 func TestFieldValueAt_SadPath_NilAndOutOfRange(t *testing.T) {
 	t.Run("Nil Data", func(t *testing.T) {
-		if got := FieldValueAt[fieldsTestEntity](nil, 0); got != "" {
+		if got := utils.FieldValueAt[fieldsTestEntity](nil, 0); got != "" {
 			t.Errorf("expected empty string for nil data, got %q", got)
 		}
 	})
 
 	t.Run("Negative Index", func(t *testing.T) {
 		entity := fieldsTestEntity{ID: "x"}
-		if got := FieldValueAt(&entity, -1); got != "" {
+		if got := utils.FieldValueAt(&entity, -1); got != "" {
 			t.Errorf("expected empty string for negative index, got %q", got)
 		}
 	})
 
 	t.Run("Out Of Range Index Does Not Panic", func(t *testing.T) {
 		entity := fieldsTestEntity{ID: "x"}
-		if got := FieldValueAt(&entity, 999); got != "" {
+		if got := utils.FieldValueAt(&entity, 999); got != "" {
 			t.Errorf("expected empty string for out-of-range index, got %q", got)
 		}
 	})
@@ -98,7 +102,7 @@ func TestFieldValueAt_SadPath_NilAndOutOfRange(t *testing.T) {
 // return "" rather than panic via reflect.Value.Interface on a value that
 // CanInterface() reports false for.
 func TestFieldValueAt_PoisonPill_UnexportedFieldNeverSelectedOrPanics(t *testing.T) {
-	idx := BunColumnFieldIndex[fieldsTestEntity]("secret")
+	idx := utils.BunColumnFieldIndex[fieldsTestEntity]("secret")
 	if idx != -1 {
 		t.Fatalf("expected unexported field with matching tag to be skipped, got index %d", idx)
 	}
@@ -111,7 +115,25 @@ func TestFieldValueAt_PoisonPill_UnexportedFieldNeverSelectedOrPanics(t *testing
 		}
 	}()
 	entity := fieldsTestEntity{secret: "MALICIOUS_POISON_PAYLOAD"}
-	if got := FieldValueAt(&entity, 5); got != "" {
+	if got := utils.FieldValueAt(&entity, 5); got != "" {
 		t.Errorf("expected empty string for unexported field, got %q (poison leaked)", got)
+	}
+}
+
+// TestFieldValueAt_PoisonPill_NilPointerFieldIsAbsentNotTheStringNil is the
+// utils-level companion to the nilpointer_test.go entity-ID case: any
+// nil pointer field (not just an ID column) must resolve to "", never the
+// literal text "<nil>".
+func TestFieldValueAt_PoisonPill_NilPointerFieldIsAbsentNotTheStringNil(t *testing.T) {
+	entity := fieldsTestEntity{ID: "x", SecretPtr: nil}
+	idx := 6 // SecretPtr's field index
+	if got := utils.FieldValueAt(&entity, idx); got != "" {
+		t.Errorf(`expected "" for a nil pointer field, got %q`, got)
+	}
+
+	val := "not nil"
+	entity.SecretPtr = &val
+	if got := utils.FieldValueAt(&entity, idx); got != "not nil" {
+		t.Errorf("expected dereferenced value %q, got %q", "not nil", got)
 	}
 }

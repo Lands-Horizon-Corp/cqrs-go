@@ -27,8 +27,8 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Run(ctx context.Context) err
 	}
 	c.info(ctx, fmt.Sprintf("starting outbox batch runner for channel: %s", c.Channel))
 	batcher := utils.NewBatcher(utils.BatcherConfig[domains.CQRSQueuePayload[TData]]{
-		BatchSize:     c.batchSize,
-		FlushInterval: c.flushInterval,
+		BatchSize:     c.BatchSize,
+		FlushInterval: c.FlushInterval,
 		Handler: func(batchCtx context.Context, batch []domains.CQRSQueuePayload[TData]) error {
 			return c.processBatch(batchCtx, batch)
 		},

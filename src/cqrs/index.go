@@ -35,12 +35,17 @@ type CQRSImpl[TData any, TResponse any, TRequest any, TID any] struct {
 	// Validator for struct validation
 	Validator *validator.Validate
 
+	// BatchSize and FlushInterval configure the outbox batcher used by
+	// Run: a flushed batch is applied to ReadSQLService once it reaches
+	// BatchSize items, or every FlushInterval, whichever comes first.
+	// Defaulted to 100 / 5s in NewCQRS if left unset.
+	BatchSize     int
+	FlushInterval time.Duration
+
 	// Pools for efficient memory management of commonly used data structures
 	stringSlicePool     *utils.BufferPool[string]
 	stringSetPool       *utils.MapPool[string, bool]
 	processedEventsPool *utils.BufferPool[domains.ProcessedEvent]
-	batchSize           int
-	flushInterval       time.Duration
 
 	// idFieldIndex is the struct field index on TData whose `bun` tag
 	// names ColumnDefaultID, resolved once here instead of on every
@@ -66,11 +71,11 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID any](
 	if c.WriteSQLService == nil {
 		panic("WriteSQLService must be initialized")
 	}
-	if c.batchSize == 0 {
-		c.batchSize = 100
+	if c.BatchSize == 0 {
+		c.BatchSize = 100
 	}
-	if c.flushInterval == 0 {
-		c.flushInterval = 5 * time.Second
+	if c.FlushInterval == 0 {
+		c.FlushInterval = 5 * time.Second
 	}
 	return &CQRSImpl[TData, TResponse, TRequest, TID]{
 		ColumnDefaultID:      c.ColumnDefaultID,
@@ -91,8 +96,8 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID any](
 		stringSlicePool:      utils.NewBufferPool[string](),
 		stringSetPool:        utils.NewMapPool[string, bool](),
 		processedEventsPool:  utils.NewBufferPool[domains.ProcessedEvent](),
-		batchSize:            c.batchSize,
-		flushInterval:        c.flushInterval,
+		BatchSize:            c.BatchSize,
+		FlushInterval:        c.FlushInterval,
 		idFieldIndex:         utils.BunColumnFieldIndex[TData](c.ColumnDefaultID),
 	}
 }

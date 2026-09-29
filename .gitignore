@@ -1,0 +1,12 @@
+# Build artifacts
+/bin/
+/dist/
+
+# SQLite test databases
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Editor/OS
+.DS_Store

@@ -30,7 +30,7 @@ func (p *BufferPool[T]) Put(buf *[]T) {
 	if cap(*buf) > 10000 {
 		return
 	}
-	clear(*buf) // drop element references so the pooled buffer doesn't pin memory
+	clear(*buf)
 	*buf = (*buf)[:0]
 	p.pool.Put(buf)
 }

@@ -1,4 +1,4 @@
-package utils
+package regression
 
 import (
 	"context"
@@ -8,22 +8,89 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Lands-Horizon-Corp/cqrs-go/src/utils"
 )
 
 // --- Happy Path Tests ---
 
-func TestBatcher_Defaults(t *testing.T) {
-	cfg := BatcherConfig[int]{}
-	b := NewBatcher(cfg)
+// TestBatcher_Defaults_BatchSizeIsOneHundred verifies the default BatchSize
+// behaviorally (pushing exactly 100 items flushes immediately, without
+// waiting on the ticker) rather than by reading the unexported cfg field —
+// this package only touches Batcher's public API.
+func TestBatcher_Defaults_BatchSizeIsOneHundred(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		received [][]int
+	)
+	handler := func(_ context.Context, batch []int) error {
+		mu.Lock()
+		defer mu.Unlock()
+		received = append(received, batch)
+		return nil
+	}
 
-	if b.cfg.BatchSize != 100 {
-		t.Errorf("expected default BatchSize 100, got %d", b.cfg.BatchSize)
+	batcher := utils.NewBatcher(utils.BatcherConfig[int]{
+		FlushInterval: time.Hour, // long enough that only size-based flushing can fire
+		Handler:       handler,
+	})
+	ctx := context.Background()
+	batcher.Start(ctx)
+	defer batcher.Stop()
+
+	for i := range 100 {
+		if err := batcher.Push(ctx, i); err != nil {
+			t.Fatalf("unexpected push error: %v", err)
+		}
 	}
-	if b.cfg.FlushInterval != 50*time.Millisecond {
-		t.Errorf("expected default FlushInterval 50ms, got %v", b.cfg.FlushInterval)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(received)
+		mu.Unlock()
+		if n == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
-	if b.cfg.BufferCap != 2000 {
-		t.Errorf("expected default BufferCap 2000, got %d", b.cfg.BufferCap)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) != 1 || len(received[0]) != 100 {
+		t.Fatalf("expected exactly one flushed batch of 100 items, got %d batches: %v", len(received), received)
+	}
+}
+
+// TestBatcher_Defaults_FlushIntervalIsFiftyMilliseconds verifies the
+// default FlushInterval behaviorally: a single pushed item (far below the
+// default BatchSize) must still get flushed once the default interval
+// elapses.
+func TestBatcher_Defaults_FlushIntervalIsFiftyMilliseconds(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		received [][]int
+	)
+	handler := func(_ context.Context, batch []int) error {
+		mu.Lock()
+		defer mu.Unlock()
+		received = append(received, batch)
+		return nil
+	}
+
+	batcher := utils.NewBatcher(utils.BatcherConfig[int]{Handler: handler}) // defaults: BatchSize=100, FlushInterval=50ms
+	ctx := context.Background()
+	batcher.Start(ctx)
+	defer batcher.Stop()
+
+	_ = batcher.Push(ctx, 1)
+
+	time.Sleep(80 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !reflect.DeepEqual(received, [][]int{{1}}) {
+		t.Errorf("expected a single-item batch flushed by the default ticker, got %v", received)
 	}
 }
 
@@ -40,13 +107,13 @@ func TestBatcher_HappyPath_BatchSizeAndStop(t *testing.T) {
 		return nil
 	}
 
-	cfg := BatcherConfig[int]{
+	cfg := utils.BatcherConfig[int]{
 		BatchSize:     3,
 		FlushInterval: 1 * time.Second,
 		Handler:       handler,
 	}
 
-	batcher := NewBatcher(cfg)
+	batcher := utils.NewBatcher(cfg)
 	ctx := context.Background()
 	batcher.Start(ctx)
 
@@ -84,13 +151,13 @@ func TestBatcher_HappyPath_TickerFlush(t *testing.T) {
 		return nil
 	}
 
-	cfg := BatcherConfig[int]{
+	cfg := utils.BatcherConfig[int]{
 		BatchSize:     10,
 		FlushInterval: 30 * time.Millisecond,
 		Handler:       handler,
 	}
 
-	batcher := NewBatcher(cfg)
+	batcher := utils.NewBatcher(cfg)
 	ctx := context.Background()
 	batcher.Start(ctx)
 	defer batcher.Stop()
@@ -117,13 +184,13 @@ func TestBatcher_HappyPath_ConcurrentPushes(t *testing.T) {
 		return nil
 	}
 
-	cfg := BatcherConfig[int]{
+	cfg := utils.BatcherConfig[int]{
 		BatchSize:     10,
 		FlushInterval: 20 * time.Millisecond,
 		Handler:       handler,
 	}
 
-	batcher := NewBatcher(cfg)
+	batcher := utils.NewBatcher(cfg)
 	ctx := context.Background()
 	batcher.Start(ctx)
 
@@ -169,14 +236,14 @@ func TestBatcher_SadPath_HandlerErrorTriggersOnError(t *testing.T) {
 		failedBatch = batch
 	}
 
-	cfg := BatcherConfig[string]{
+	cfg := utils.BatcherConfig[string]{
 		BatchSize:     2,
 		FlushInterval: 1 * time.Second,
 		Handler:       handler,
 		OnError:       onError,
 	}
 
-	batcher := NewBatcher(cfg)
+	batcher := utils.NewBatcher(cfg)
 	ctx := context.Background()
 	batcher.Start(ctx)
 
@@ -198,14 +265,14 @@ func TestBatcher_SadPath_HandlerErrorTriggersOnError(t *testing.T) {
 }
 
 func TestBatcher_SadPath_PushCancelledContext(t *testing.T) {
-	cfg := BatcherConfig[int]{
+	cfg := utils.BatcherConfig[int]{
 		BatchSize:     1,
 		BufferCap:     1,
 		FlushInterval: 1 * time.Second,
 		Handler:       func(ctx context.Context, batch []int) error { return nil },
 	}
 
-	batcher := NewBatcher(cfg)
+	batcher := utils.NewBatcher(cfg)
 
 	ctx := context.Background()
 	_ = batcher.Push(ctx, 100)
@@ -219,6 +286,9 @@ func TestBatcher_SadPath_PushCancelledContext(t *testing.T) {
 	}
 }
 
+// TestBatcher_SadPath_WorkerContextCancelled asserts the drain-on-cancel
+// behavior by polling the observed output with a timeout, rather than
+// reaching into the unexported wg field to know when the worker exited.
 func TestBatcher_SadPath_WorkerContextCancelled(t *testing.T) {
 	var (
 		mu       sync.Mutex
@@ -232,13 +302,13 @@ func TestBatcher_SadPath_WorkerContextCancelled(t *testing.T) {
 		return nil
 	}
 
-	cfg := BatcherConfig[int]{
-		BatchSize:     100, // High size to prevent full batch flush
+	cfg := utils.BatcherConfig[int]{
+		BatchSize:     100, // high enough to prevent a full-batch flush
 		FlushInterval: 5 * time.Second,
 		Handler:       handler,
 	}
 
-	batcher := NewBatcher(cfg)
+	batcher := utils.NewBatcher(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	batcher.Start(ctx)
@@ -247,15 +317,22 @@ func TestBatcher_SadPath_WorkerContextCancelled(t *testing.T) {
 	_ = batcher.Push(ctx, 2)
 
 	cancel()
-	batcher.wg.Wait()
+
+	expected := []int{1, 2}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		match := reflect.DeepEqual(received, expected)
+		mu.Unlock()
+		if match {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
-
-	expected := []int{1, 2}
-	if !reflect.DeepEqual(received, expected) {
-		t.Errorf("expected drained batch %v on context cancellation, got %v", expected, received)
-	}
+	t.Errorf("expected drained batch %v on context cancellation, got %v", expected, received)
 }
 
 type Message struct {
@@ -288,14 +365,14 @@ func TestBatcher_PoisonPill_IsolationAndRecovery(t *testing.T) {
 		failedBatches = append(failedBatches, batch)
 	}
 
-	cfg := BatcherConfig[Message]{
+	cfg := utils.BatcherConfig[Message]{
 		BatchSize:     2,
 		FlushInterval: 1 * time.Second,
 		Handler:       handler,
 		OnError:       onError,
 	}
 
-	batcher := NewBatcher(cfg)
+	batcher := utils.NewBatcher(cfg)
 	ctx := context.Background()
 	batcher.Start(ctx)
 
