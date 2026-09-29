@@ -39,9 +39,9 @@ func TestZeroValue_BoolCannotDistinguishAbsentFromFalse(t *testing.T) {
 // type on widget, not just *bool.
 func TestZeroValue_PointerFieldsDistinguishAbsentFromExplicitZero(t *testing.T) {
 	cases := []struct {
-		name    string
-		json    string
-		check   func(t *testing.T, w widget)
+		name  string
+		json  string
+		check func(t *testing.T, w widget)
 	}{
 		{
 			name: "Bool: Key Absent -> nil",

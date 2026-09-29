@@ -93,9 +93,9 @@ func TestNilPointer_CDCPath_MixedNilAndSetFieldsNeverPanics(t *testing.T) {
 
 	cases := []widget{
 		{ID: "w1", Name: "n"},                                        // every pointer nil
-		{ID: "w1", Name: "n2", Featured: boolPtr(true)},               // one set
-		{ID: "w1", Name: "n3", Featured: nil, Notes: stringPtr("x")},  // mixed
-		{ID: "w1", Name: "n4", Priority: intPtr(0)},                   // explicit zero, not nil
+		{ID: "w1", Name: "n2", Featured: boolPtr(true)},              // one set
+		{ID: "w1", Name: "n3", Featured: nil, Notes: stringPtr("x")}, // mixed
+		{ID: "w1", Name: "n4", Priority: intPtr(0)},                  // explicit zero, not nil
 	}
 
 	for i, w := range cases {
