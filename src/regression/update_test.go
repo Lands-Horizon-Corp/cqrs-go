@@ -190,3 +190,98 @@ func TestUpdateByID_PoisonPill_ForgottenFieldsGetClobbered(t *testing.T) {
 			got.Featured, got.Notes, got.Priority)
 	}
 }
+
+func TestUpdateMany_HappyPath_UpdatesAllRowsInOneStatement(t *testing.T) {
+	c, write := newTestCQRS(t)
+	ctx := context.Background()
+	seedWidget(t, c, widget{ID: "a", Name: "old-a", Active: false})
+	seedWidget(t, c, widget{ID: "b", Name: "old-b", Active: false})
+
+	res, err := c.UpdateMany(ctx, []widget{
+		{ID: "a", Name: "new-a", Active: true},
+		{ID: "b", Name: "new-b", Active: true},
+	})
+	if err != nil {
+		t.Fatalf("UpdateMany returned error: %v", err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("expected 2 resources, got %d", len(res))
+	}
+
+	for _, id := range []string{"a", "b"} {
+		got, ok := readWidgetFrom(t, write, id)
+		if !ok || got.Name != "new-"+id || !got.Active {
+			t.Errorf("expected %s updated to new-%s/active=true, got %+v (found=%v)", id, id, got, ok)
+		}
+	}
+}
+
+func TestUpdateMany_SadPath_EmptyInputIsANoOp(t *testing.T) {
+	c, _ := newTestCQRS(t)
+	res, err := c.UpdateMany(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("expected no error for empty input, got %v", err)
+	}
+	if len(res) != 0 {
+		t.Errorf("expected empty result, got %d entries", len(res))
+	}
+}
+
+func TestUpdateMany_SadPath_ValidationFailureBlocksWholeBatch(t *testing.T) {
+	c, write := newTestCQRS(t)
+	ctx := context.Background()
+	seedWidget(t, c, widget{ID: "a", Name: "original"})
+
+	_, err := c.UpdateMany(ctx, []widget{
+		{ID: "a", Name: "ok"},
+		{ID: "b", Name: ""}, // Name required
+	})
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+	if got, ok := readWidgetFrom(t, write, "a"); !ok || got.Name != "original" {
+		t.Errorf("expected row untouched after validation failure, got name %q", got.Name)
+	}
+}
+
+// TestUpdateMany_PoisonPill_MissingIDsAreSilentlyIgnored documents the bulk
+// semantics explicitly: unlike UpdateByID, a bulk update doesn't surface a
+// not-found signal for IDs that don't exist — consistent with DeleteMany's
+// existing behavior for the same reason (no individual per-row result).
+func TestUpdateMany_PoisonPill_MissingIDsAreSilentlyIgnored(t *testing.T) {
+	c, write := newTestCQRS(t)
+	ctx := context.Background()
+	seedWidget(t, c, widget{ID: "a", Name: "original"})
+
+	_, err := c.UpdateMany(ctx, []widget{
+		{ID: "a", Name: "updated"},
+		{ID: "ghost", Name: "updated"},
+	})
+	if err != nil {
+		t.Fatalf("expected no error for a mix of existing and missing IDs, got %v", err)
+	}
+	if got, ok := readWidgetFrom(t, write, "a"); !ok || got.Name != "updated" {
+		t.Errorf("expected 'a' to be updated, got %+v (found=%v)", got, ok)
+	}
+	if _, ok := readWidgetFrom(t, write, "ghost"); ok {
+		t.Error("expected 'ghost' to not have been created by the update")
+	}
+}
+
+func TestUpdateMany_HappyPath_NilToResourceReturnsNilResponses(t *testing.T) {
+	write := newFakeSQLService(t)
+	c := newCQRSNoResource(t, write)
+	ctx := context.Background()
+	seedWidget(t, c, widget{ID: "a", Name: "old"})
+
+	res, err := c.UpdateMany(ctx, []widget{{ID: "a", Name: "new"}})
+	if err != nil {
+		t.Fatalf("UpdateMany returned error: %v", err)
+	}
+	if res != nil {
+		t.Errorf("expected nil responses when ToResource is unset, got %+v", res)
+	}
+	if got, ok := readWidgetFrom(t, write, "a"); !ok || got.Name != "new" {
+		t.Errorf("expected the update to still persist, got %q (found=%v)", got.Name, ok)
+	}
+}

@@ -50,6 +50,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Run(ctx context.Context) err
 				env.EventID = string(key)
 			} else {
 				env.EventID = fmt.Sprintf("%s-%d", c.Channel, time.Now().UnixNano())
+				c.warn(ctx, fmt.Sprintf("message on channel %s arrived with no event_id and no key; synthesized %s — check the producer", c.Channel, env.EventID))
 			}
 		}
 		return batcher.Push(ctx, env)
@@ -66,6 +67,9 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) processBatch(
 	appliedMessages, err := c.syncBatchToReadDB(ctx, batch)
 	if err != nil {
 		return fmt.Errorf("synchronizing batch to read db: %w", err)
+	}
+	if len(appliedMessages) > 0 {
+		c.success(ctx, fmt.Sprintf("synchronized %d change(s) to the read db for channel %s", len(appliedMessages), c.Channel))
 	}
 	for i := range appliedMessages {
 		msg := &appliedMessages[i]

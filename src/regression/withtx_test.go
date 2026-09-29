@@ -316,3 +316,74 @@ func TestDeleteManyWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
 		t.Fatal("expected a DB error once the table is gone, got nil")
 	}
 }
+
+func TestUpdateManyWithTx_HappyPath_UpdatesAllRowsWithinTransaction(t *testing.T) {
+	c, write := newTestCQRS(t)
+	seedWidget(t, c, widget{ID: "a", Name: "old-a"})
+	seedWidget(t, c, widget{ID: "b", Name: "old-b"})
+
+	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
+		res, err := c.UpdateManyWithTx(ctx, tx, []widget{
+			{ID: "a", Name: "new-a"},
+			{ID: "b", Name: "new-b"},
+		})
+		if err != nil {
+			return err
+		}
+		if len(res) != 2 {
+			t.Fatalf("expected 2 resources, got %d", len(res))
+		}
+		return nil
+	})
+
+	for _, id := range []string{"a", "b"} {
+		if got, ok := readWidgetFrom(t, write, id); !ok || got.Name != "new-"+id {
+			t.Errorf("expected %s updated to new-%s, got %+v (found=%v)", id, id, got, ok)
+		}
+	}
+}
+
+func TestUpdateManyWithTx_SadPath_EmptyInputIsANoOp(t *testing.T) {
+	c, write := newTestCQRS(t)
+	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
+		res, err := c.UpdateManyWithTx(ctx, tx, nil)
+		if err != nil {
+			t.Fatalf("expected no error for empty input, got %v", err)
+		}
+		if len(res) != 0 {
+			t.Errorf("expected empty result, got %d", len(res))
+		}
+		return nil
+	})
+}
+
+func TestUpdateManyWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
+	c, write := newTestCQRS(t)
+	seedWidget(t, c, widget{ID: "a", Name: "n"})
+	dropWidgetsTable(t, write)
+
+	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
+		_, err := c.UpdateManyWithTx(ctx, tx, []widget{{ID: "a", Name: "n2"}})
+		return err
+	})
+	if err == nil {
+		t.Fatal("expected a DB error once the table is gone, got nil")
+	}
+}
+
+func TestUpdateManyWithTx_HappyPath_NilToResourceReturnsNilResponses(t *testing.T) {
+	write := newFakeSQLService(t)
+	c := newCQRSNoResource(t, write)
+	seedWidget(t, c, widget{ID: "a", Name: "old"})
+
+	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
+		res, err := c.UpdateManyWithTx(ctx, tx, []widget{{ID: "a", Name: "new"}})
+		if err != nil {
+			return err
+		}
+		if res != nil {
+			t.Errorf("expected nil responses when ToResource is unset, got %+v", res)
+		}
+		return nil
+	})
+}

@@ -91,6 +91,15 @@ func skipUnlessInfraReachable(t *testing.T) {
 func newPostgresSQLService(t *testing.T, dsn string) *fakeSQLService {
 	t.Helper()
 	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+	// Bounded on purpose: database/sql defaults to an unbounded pool, and
+	// Postgres's own default max_connections is commonly 100 shared across
+	// every client (this stack alone runs two Postgres instances, each
+	// with their own pool, plus Debezium's replication connection). A
+	// concurrent workload without this cap can exhaust the server's
+	// connection limit outright — found by the load test hammering
+	// UpdateByID through a 100-goroutine pool with no cap set.
+	sqldb.SetMaxOpenConns(20)
+	sqldb.SetMaxIdleConns(20)
 	db := bun.NewDB(sqldb, pgdialect.New())
 	t.Cleanup(func() { _ = db.Close() })
 
@@ -236,6 +245,77 @@ func (b *realKafkaBroker) Subscribe(ctx context.Context, topic string, handler f
 		}
 		if err := handler(m.Key, m.Value); err != nil {
 			return err
+		}
+	}
+}
+
+// --- realKafkaGroupBroker: consumer-group variant of realKafkaBroker ---
+//
+// realKafkaBroker above always reads partition 0 from the beginning, which
+// is fine for a test that creates its own fresh topic and consumes it
+// once. This variant uses a real consumer group with an offset commit
+// only after a message is successfully handled (so a crash mid-processing
+// redelivers rather than loses it) — needed by the chaos test (does a
+// group survive a broker restart?) and the Debezium bridge test (which
+// consumes debeziumSourceTopic, a topic shared with every other test that
+// has ever touched postgres-write's "widgets" table, so it needs
+// StartOffset control to avoid replaying that entire history).
+type realKafkaGroupBroker struct {
+	brokers     []string
+	groupID     string
+	startOffset int64 // kafka.FirstOffset or kafka.LastOffset
+}
+
+func newRealKafkaGroupBroker(addr, groupID string, startOffset int64) *realKafkaGroupBroker {
+	return &realKafkaGroupBroker{brokers: []string{addr}, groupID: groupID, startOffset: startOffset}
+}
+
+func (b *realKafkaGroupBroker) Publish(ctx context.Context, topic string, key, value []byte) error {
+	w := &kafka.Writer{
+		Addr:                   kafka.TCP(b.brokers...),
+		Topic:                  topic,
+		Balancer:               &kafka.LeastBytes{},
+		AllowAutoTopicCreation: false,
+	}
+	defer w.Close()
+
+	// Same retry as realKafkaBroker.Publish: a Writer used moments after a
+	// topic was created can briefly see stale "doesn't exist" metadata
+	// from kafka-go's shared Transport cache.
+	deadline := time.Now().Add(10 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		lastErr = w.WriteMessages(ctx, kafka.Message{Key: key, Value: value})
+		if lastErr == nil || !strings.Contains(lastErr.Error(), "Unknown Topic Or Partition") {
+			return lastErr
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("publishing to %q after retrying past metadata propagation: %w", topic, lastErr)
+}
+
+func (b *realKafkaGroupBroker) Subscribe(ctx context.Context, topic string, handler func(key, value []byte) error) error {
+	r := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:     b.brokers,
+		Topic:       topic,
+		GroupID:     b.groupID,
+		StartOffset: b.startOffset,
+	})
+	defer r.Close()
+
+	for {
+		m, err := r.FetchMessage(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("fetching from %q: %w", topic, err)
+		}
+		if err := handler(m.Key, m.Value); err != nil {
+			return err
+		}
+		if err := r.CommitMessages(ctx, m); err != nil {
+			return fmt.Errorf("committing offset for %q partition %d offset %d: %w", topic, m.Partition, m.Offset, err)
 		}
 	}
 }

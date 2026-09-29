@@ -69,26 +69,33 @@ Tear down (and wipe the data volumes, so init scripts re-run next time):
 docker compose down -v
 ```
 
-## Important: this does not make `CQRSImpl.Run` work out of the box
+## Debezium's real output vs. what `CQRSImpl.Run` consumes
 
 `connector-postgres-write.json` runs Debezium's **default** envelope shape
 — `{before, after, source, op, ts_ms}` — because that's what a real
-Debezium deployment actually produces. This repo's `CQRSImpl.Run`
-(`src/cqrs/cqrs.run.go`) currently unmarshals straight into its own custom
-`{event_id, change_type, payload}` shape (`domains.CQRSQueuePayload`),
-which nothing here produces. Point `Run` at the topic this connector
-publishes to (`cqrs.public.<table>`) and it will fail to populate those
-fields correctly.
+Debezium deployment actually produces. `CQRSImpl.Run` (`src/cqrs/cqrs.run.go`)
+only understands its own `{event_id, change_type, payload}` shape
+(`domains.CQRSQueuePayload`), so it can't consume the connector's raw topic
+(`cqrs.public.<table>`) directly.
 
-You still need one of:
-- A Kafka Connect **Single Message Transform** (SMT) in the connector
-  config that reshapes Debezium's envelope into `{event_id, change_type,
-  payload}` before it hits the topic `Run` subscribes to, or
-- A small adapter service between Debezium's raw topic and the topic
-  `Run` actually consumes, doing that same reshape.
+The bridge between them is `src/debezium`:
+- `debezium.Transform[T]` turns one raw Debezium record into
+  `domains.CQRSQueuePayload[T]` — captured and verified against this
+  connector's real live output, including the caveat that a delete
+  record's `before` only reliably carries the primary key under the
+  default `REPLICA IDENTITY` (see the package doc for why that's fine for
+  this library's own needs).
+- `debezium.RunBridge` wires a source topic (the connector's raw output)
+  through `Transform` to a destination topic (whatever `Run`'s `Channel`
+  is actually subscribed to).
 
-This stack gets you real Debezium output to develop that transform
-against — it's the missing piece, not a bonus.
+`src/regression/integration_debezium_test.go`
+(`TestIntegration_HappyPath_RealDebeziumThroughBridgeAlignsRealPostgresRead`)
+proves the full chain end to end against this exact stack: a real write to
+`postgres-write`, captured for real by this connector, transformed by
+`RunBridge`, consumed by a real `CQRSImpl.Run`, landing in `postgres-read`
+— no hand-built envelope anywhere in that path. Run it with
+`go test -tags=integration ./src/regression/... -run TestIntegration_HappyPath_RealDebeziumThroughBridgeAlignsRealPostgresRead -v`.
 
 ## If an image pull fails
 

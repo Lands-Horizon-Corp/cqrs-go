@@ -36,6 +36,84 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateByID(
 	return nil, nil
 }
 
+// UpdateMany bulk-updates every row in data in a single statement, matched
+// by primary key (bun's Bulk() update: an UPDATE ... FROM VALUES(...)
+// joined back to the table by PK). Unlike UpdateByID, it does not report
+// which IDs (if any) didn't exist — consistent with DeleteMany, which has
+// the same silent-no-op-for-missing-IDs behavior for the same reason: a
+// bulk statement doesn't get an individual not-found signal per row.
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateMany(
+	ctx context.Context,
+	data []TData,
+) ([]*TResponse, error) {
+	if len(data) == 0 {
+		return []*TResponse{}, nil
+	}
+	if c.Validator != nil {
+		for i := range data {
+			if err := c.Validator.StructCtx(ctx, &data[i]); err != nil {
+				return nil, fmt.Errorf("validating request payload at index %d: %w", i, err)
+			}
+		}
+	}
+
+	_, err := c.WriteSQLService.Client().NewUpdate().
+		Model(&data).
+		Bulk().
+		Exec(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("bulk updating records: %w", err)
+	}
+
+	if c.ToResource == nil {
+		return nil, nil
+	}
+	responses := make([]*TResponse, 0, len(data))
+	for i := range data {
+		if res := c.ToResource(&data[i]); res != nil {
+			responses = append(responses, res)
+		}
+	}
+	return responses, nil
+}
+
+// UpdateManyWithTx is UpdateMany run against a caller-supplied transaction.
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateManyWithTx(
+	ctx context.Context,
+	tx bun.Tx,
+	data []TData,
+) ([]*TResponse, error) {
+	if len(data) == 0 {
+		return []*TResponse{}, nil
+	}
+	if c.Validator != nil {
+		for i := range data {
+			if err := c.Validator.StructCtx(ctx, &data[i]); err != nil {
+				return nil, fmt.Errorf("validating request payload at index %d: %w", i, err)
+			}
+		}
+	}
+
+	_, err := tx.NewUpdate().
+		Model(&data).
+		Bulk().
+		Exec(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("bulk updating records in tx: %w", err)
+	}
+
+	if c.ToResource == nil {
+		return nil, nil
+	}
+	responses := make([]*TResponse, 0, len(data))
+	for i := range data {
+		if res := c.ToResource(&data[i]); res != nil {
+			responses = append(responses, res)
+		}
+	}
+	return responses, nil
+}
+
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateByIDWithTx(
 	ctx context.Context,
 	tx bun.Tx,

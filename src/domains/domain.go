@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/segmentio/kafka-go"
 	"github.com/uptrace/bun"
 )
 
@@ -45,8 +44,13 @@ type BroadcastService interface {
 	Broadcast(channels []Channel, events Events, payload any) error
 }
 
+// MessageBrokerService is deliberately transport-agnostic: no method here
+// references a concrete pub/sub client type, so implementing it (Kafka,
+// NATS, an HTTP webhook receiver for Debezium Server, or anything else)
+// never forces a specific broker library onto a consumer of this package
+// who doesn't use that implementation. src/kafka.Broker is one real
+// implementation, not the only one this interface allows.
 type MessageBrokerService interface {
-	Client() *kafka.Client
 	Publish(ctx context.Context, topic string, key, value []byte) error
 	Subscribe(ctx context.Context, topic string, handler func(key, value []byte) error) error
 }
