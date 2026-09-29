@@ -23,6 +23,7 @@ import (
 // actually reaches Subscribe and a broadcast call, not just the struct
 // field.
 func TestErrorPaths_NewCQRS_PreservesChannel(t *testing.T) {
+	t.Parallel()
 	t.Run("Explicit Channel", func(t *testing.T) {
 		h := newCDCHarness(t, 1)
 		if h.c.Channel != "widgets" {
@@ -66,6 +67,7 @@ func TestErrorPaths_NewCQRS_PreservesChannel(t *testing.T) {
 }
 
 func TestErrorPaths_NewCQRS_PanicsWithoutWriteSQLService(t *testing.T) {
+	t.Parallel()
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -76,6 +78,7 @@ func TestErrorPaths_NewCQRS_PanicsWithoutWriteSQLService(t *testing.T) {
 }
 
 func TestErrorPaths_Run_PanicsWhenWriteSQLServiceUnreachable(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	write.db.Close() // subsequent Ping fails
 	c := cqrs.NewCQRS(cqrs.CQRSImpl[widget, widgetResource, any, string]{
@@ -92,6 +95,7 @@ func TestErrorPaths_Run_PanicsWhenWriteSQLServiceUnreachable(t *testing.T) {
 }
 
 func TestErrorPaths_Run_PanicsWhenReadSQLServiceUnreachable(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	read := newFakeSQLService(t)
 	read.db.Close() // subsequent Ping fails
@@ -110,6 +114,7 @@ func TestErrorPaths_Run_PanicsWhenReadSQLServiceUnreachable(t *testing.T) {
 }
 
 func TestErrorPaths_Run_ReturnsErrorWithoutMessageBrokerService(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	c := cqrs.NewCQRS(cqrs.CQRSImpl[widget, widgetResource, any, string]{
 		WriteSQLService: write,
@@ -122,6 +127,7 @@ func TestErrorPaths_Run_ReturnsErrorWithoutMessageBrokerService(t *testing.T) {
 }
 
 func TestErrorPaths_Run_MalformedJSONIsLoggedAndSkipped(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -148,6 +154,7 @@ func TestErrorPaths_Run_MalformedJSONIsLoggedAndSkipped(t *testing.T) {
 // event_id, it's taken from the Kafka message key if present, otherwise a
 // channel+timestamp value is synthesized.
 func TestErrorPaths_Run_EventIDDefaultsFromKafkaKeyThenFallback(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -196,6 +203,7 @@ func TestErrorPaths_Run_EventIDDefaultsFromKafkaKeyThenFallback(t *testing.T) {
 // recognize it, so it isn't written to the read db — but it must still be
 // reported through handleEvent, not silently dropped.
 func TestErrorPaths_ProcessBatch_UnknownChangeTypeGoesThroughDefaultBranch(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -234,12 +242,14 @@ func TestErrorPaths_ProcessBatch_UnknownChangeTypeGoesThroughDefaultBranch(t *te
 // --- handleEvent branch coverage (via the exported OnCreated/OnUpdated/OnDeleted) ---
 
 func TestErrorPaths_HandleEvent_NilDataIsANoOp(t *testing.T) {
+	t.Parallel()
 	c, _ := newTestCQRS(t)
 	c.OnCreated(context.Background(), nil) // must not panic, must not spawn work
 	time.Sleep(20 * time.Millisecond)
 }
 
 func TestErrorPaths_HandleEvent_NilToResourceIsANoOp(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	c := newCQRSNoResource(t, write)
 	c.OnCreated(context.Background(), &widget{ID: "w1", Name: "n"})
@@ -247,6 +257,7 @@ func TestErrorPaths_HandleEvent_NilToResourceIsANoOp(t *testing.T) {
 }
 
 func TestErrorPaths_HandleEvent_ToResourcePanicIsRecoveredAndLogged(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	logs := &fakeLogService{}
 	c := cqrs.NewCQRS(cqrs.CQRSImpl[widget, widgetResource, any, string]{
@@ -272,6 +283,7 @@ func TestErrorPaths_HandleEvent_ToResourcePanicIsRecoveredAndLogged(t *testing.T
 }
 
 func TestErrorPaths_HandleEvent_NilResourceFromToResourceIsANoOp(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	broadcast := newFakeBroadcastService()
 	c := cqrs.NewCQRS(cqrs.CQRSImpl[widget, widgetResource, any, string]{
@@ -291,6 +303,7 @@ func TestErrorPaths_HandleEvent_NilResourceFromToResourceIsANoOp(t *testing.T) {
 }
 
 func TestErrorPaths_HandleEvent_DispatchErrorIsLoggedButDoesNotBlockBroadcast(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	logs := &fakeLogService{}
 	broadcast := newFakeBroadcastService()
@@ -322,6 +335,7 @@ func TestErrorPaths_HandleEvent_DispatchErrorIsLoggedButDoesNotBlockBroadcast(t 
 }
 
 func TestErrorPaths_HandleEvent_BroadcastErrorIsLogged(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	logs := &fakeLogService{}
 	broadcast := newFakeBroadcastService()

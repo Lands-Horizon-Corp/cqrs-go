@@ -106,6 +106,7 @@ const debeziumUpdateFixture = `{"before":null,"after":{"id":"w1","name":"gadget2
 const debeziumDeleteFixture = `{"before":{"id":"w1","name":"","active":false},"after":null,"source":{"version":"2.7.3.Final","connector":"postgresql","name":"cqrs","ts_ms":1790710564912,"snapshot":"false","db":"cqrs_write","sequence":"[\"314477896\",\"314477896\"]","ts_us":1790710564912478,"ts_ns":1790710564912478000,"schema":"public","table":"widgets","txId":65251,"lsn":314477896,"xmin":null},"transaction":null,"op":"d","ts_ms":1790710564925,"ts_us":1790710564925024,"ts_ns":1790710564925024837}`
 
 func TestDebeziumTransform_HappyPath_RealCapturedFixtures(t *testing.T) {
+	t.Parallel()
 	t.Run("Create", func(t *testing.T) {
 		got, err := transformDebezium[debeziumWidget]([]byte(debeziumCreateFixture))
 		if err != nil {
@@ -155,6 +156,7 @@ func TestDebeziumTransform_HappyPath_RealCapturedFixtures(t *testing.T) {
 }
 
 func TestDebeziumTransform_HappyPath_EventIDIsStableAndUnique(t *testing.T) {
+	t.Parallel()
 	a, err := transformDebezium[debeziumWidget]([]byte(debeziumCreateFixture))
 	if err != nil {
 		t.Fatalf("transformDebezium returned error: %v", err)
@@ -177,6 +179,7 @@ func TestDebeziumTransform_HappyPath_EventIDIsStableAndUnique(t *testing.T) {
 }
 
 func TestDebeziumTransform_SadPath_MalformedOrIncompleteInput(t *testing.T) {
+	t.Parallel()
 	t.Run("Malformed JSON", func(t *testing.T) {
 		_, err := transformDebezium[debeziumWidget]([]byte("{not valid"))
 		if err == nil {
@@ -213,6 +216,7 @@ func TestDebeziumTransform_SadPath_MalformedOrIncompleteInput(t *testing.T) {
 }
 
 func TestDebeziumTransform_PoisonPill_Tombstone(t *testing.T) {
+	t.Parallel()
 	_, err := transformDebezium[debeziumWidget]([]byte(`{"before":null,"after":null,"op":"","source":{"table":"widgets","lsn":1}}`))
 	if !errors.Is(err, errDebeziumTombstone) {
 		t.Fatalf("expected errDebeziumTombstone for a fully-null record, got %v", err)

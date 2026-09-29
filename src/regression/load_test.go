@@ -57,7 +57,7 @@ func TestLoad_BulkCreateUpdateDeleteThroughput(t *testing.T) {
 	}
 	t.Logf("load scale: N=%d creates/deletes, %d updates, BatchSize=%d (override via CQRS_IT_LOAD_N / CQRS_IT_LOAD_UPDATE_N)", n, updateN, batchSize)
 
-	h := newCDCHarnessIT(t, "load", batchSize)
+	h := newCDCHarnessITWithPool(t, "load", batchSize, 30) // this test runs alone, never under t.Parallel() — see updateWorkers below
 	// Default FlushInterval is 5s. At this test's scale, the trailing
 	// partial batch after each phase's full-size batches would otherwise
 	// sit waiting on that ticker rather than the read db's actual apply

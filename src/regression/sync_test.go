@@ -36,6 +36,7 @@ func emitFor(t *testing.T, h *cdcHarness, eventID string, changeType domains.Cha
 }
 
 func TestSync_HappyPath_CreateThenCDCAlignsReadWithWrite(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -81,6 +82,7 @@ func TestSync_HappyPath_CreateThenCDCAlignsReadWithWrite(t *testing.T) {
 }
 
 func TestSync_HappyPath_CreateWithZeroAndAbsentValuesAligns(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -110,6 +112,7 @@ func TestSync_HappyPath_CreateWithZeroAndAbsentValuesAligns(t *testing.T) {
 }
 
 func TestSync_HappyPath_UpdateThenCDCAlignsReadWithWrite(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -153,6 +156,7 @@ func TestSync_HappyPath_UpdateThenCDCAlignsReadWithWrite(t *testing.T) {
 }
 
 func TestSync_HappyPath_DeleteThenCDCAlignsReadWithWrite(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -190,6 +194,7 @@ func TestSync_HappyPath_DeleteThenCDCAlignsReadWithWrite(t *testing.T) {
 }
 
 func TestSync_SadPath_DeleteEventForRowNotInReadDBIsSafeNoOp(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -217,6 +222,7 @@ func TestSync_SadPath_DeleteEventForRowNotInReadDBIsSafeNoOp(t *testing.T) {
 // at-least-once redelivery: the same EventID arriving twice must be
 // applied to the read db, and broadcast, exactly once.
 func TestSync_HappyPath_DuplicateEventIDIsAppliedOnce(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -257,6 +263,7 @@ type conventionIDWidget struct {
 }
 
 func TestSync_HappyPath_EntityKeyFallsBackToEventIDWhenColumnUnresolved(t *testing.T) {
+	t.Parallel()
 	sqldb, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("opening sqlite: %v", err)
@@ -322,6 +329,7 @@ func TestSync_HappyPath_EntityKeyFallsBackToEventIDWhenColumnUnresolved(t *testi
 // table each statement depends on before the event is applied.
 
 func TestSync_SadPath_ProcessedEventsInsertFailureIsReportedViaOnError(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -345,6 +353,7 @@ func TestSync_SadPath_ProcessedEventsInsertFailureIsReportedViaOnError(t *testin
 }
 
 func TestSync_SadPath_UpsertFailureIsReportedViaOnError(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -369,6 +378,7 @@ func TestSync_SadPath_UpsertFailureIsReportedViaOnError(t *testing.T) {
 }
 
 func TestSync_SadPath_DeleteFailureIsReportedViaOnError(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -397,6 +407,7 @@ func TestSync_SadPath_DeleteFailureIsReportedViaOnError(t *testing.T) {
 // complex data" case: several pointer fields, some nil, some not, all
 // synced together in a single write+CDC round trip.
 func TestSync_PoisonPill_ComplexDataWithMixedNilsAligns(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

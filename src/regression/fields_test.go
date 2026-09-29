@@ -18,6 +18,7 @@ type fieldsTestEntity struct {
 }
 
 func TestBunColumnFieldIndex_HappyPath_ResolvesMatchingColumn(t *testing.T) {
+	t.Parallel()
 	idx := utils.BunColumnFieldIndex[fieldsTestEntity]("id")
 	if idx != 0 {
 		t.Fatalf("expected index 0 for column 'id', got %d", idx)
@@ -30,6 +31,7 @@ func TestBunColumnFieldIndex_HappyPath_ResolvesMatchingColumn(t *testing.T) {
 }
 
 func TestFieldValueAt_HappyPath_ReadsStringAndNonString(t *testing.T) {
+	t.Parallel()
 	entity := fieldsTestEntity{ID: "abc-123", Name: "widget", Age: 7}
 
 	idIdx := utils.BunColumnFieldIndex[fieldsTestEntity]("id")
@@ -44,6 +46,7 @@ func TestFieldValueAt_HappyPath_ReadsStringAndNonString(t *testing.T) {
 }
 
 func TestBunColumnFieldIndex_SadPath_NoMatchOrNotStruct(t *testing.T) {
+	t.Parallel()
 	t.Run("Unknown Column", func(t *testing.T) {
 		idx := utils.BunColumnFieldIndex[fieldsTestEntity]("does_not_exist")
 		if idx != -1 {
@@ -74,6 +77,7 @@ func TestBunColumnFieldIndex_SadPath_NoMatchOrNotStruct(t *testing.T) {
 }
 
 func TestFieldValueAt_SadPath_NilAndOutOfRange(t *testing.T) {
+	t.Parallel()
 	t.Run("Nil Data", func(t *testing.T) {
 		if got := utils.FieldValueAt[fieldsTestEntity](nil, 0); got != "" {
 			t.Errorf("expected empty string for nil data, got %q", got)
@@ -103,6 +107,7 @@ func TestFieldValueAt_SadPath_NilAndOutOfRange(t *testing.T) {
 // return "" rather than panic via reflect.Value.Interface on a value that
 // CanInterface() reports false for.
 func TestFieldValueAt_PoisonPill_UnexportedFieldNeverSelectedOrPanics(t *testing.T) {
+	t.Parallel()
 	idx := utils.BunColumnFieldIndex[fieldsTestEntity]("secret")
 	if idx != -1 {
 		t.Fatalf("expected unexported field with matching tag to be skipped, got index %d", idx)
@@ -126,6 +131,7 @@ func TestFieldValueAt_PoisonPill_UnexportedFieldNeverSelectedOrPanics(t *testing
 // nil pointer field (not just an ID column) must resolve to "", never the
 // literal text "<nil>".
 func TestFieldValueAt_PoisonPill_NilPointerFieldIsAbsentNotTheStringNil(t *testing.T) {
+	t.Parallel()
 	entity := fieldsTestEntity{ID: "x", SecretPtr: nil}
 	idx := 6 // SecretPtr's field index
 	if got := utils.FieldValueAt(&entity, idx); got != "" {
@@ -143,6 +149,7 @@ func TestFieldValueAt_PoisonPill_NilPointerFieldIsAbsentNotTheStringNil(t *testi
 // the Slice/Map/Chan/Func branch of formatFieldValue: a nil slice must
 // resolve to "", not "[]" or the literal text "<nil>".
 func TestFieldValueAt_PoisonPill_NilSliceFieldIsAbsentNotTheStringNil(t *testing.T) {
+	t.Parallel()
 	entity := fieldsTestEntity{ID: "x", Tags: nil}
 	idx := 7 // Tags' field index
 	if got := utils.FieldValueAt(&entity, idx); got != "" {

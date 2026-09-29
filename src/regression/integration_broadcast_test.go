@@ -20,6 +20,7 @@ import (
 // in-process, which the fake-backed tests elsewhere already cover.
 
 func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Created(t *testing.T) {
+	t.Parallel()
 	c, _, _, broker, topic := newBroadcastIntegrationHarness(t, "bcast-created")
 	sub := newPusherSubscriber(t, topic)
 
@@ -63,6 +64,7 @@ func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Created(t *te
 }
 
 func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Updated(t *testing.T) {
+	t.Parallel()
 	c, _, _, broker, topic := newBroadcastIntegrationHarness(t, "bcast-updated")
 	sub := newPusherSubscriber(t, topic)
 
@@ -118,6 +120,7 @@ func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Updated(t *te
 }
 
 func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Deleted(t *testing.T) {
+	t.Parallel()
 	c, _, _, broker, topic := newBroadcastIntegrationHarness(t, "bcast-deleted")
 	sub := newPusherSubscriber(t, topic)
 

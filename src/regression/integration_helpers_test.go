@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,39 +85,113 @@ func skipUnlessInfraReachable(t *testing.T) {
 	check("sockudo", itPusherAddr)
 }
 
-// newPostgresSQLService opens a real Postgres connection via bun/pgdriver.
-// It shares fakeSQLService's shape (Ping/Client over a *bun.DB) since that
-// wrapper never actually depended on SQLite — only the DSN and dialect
-// differ here.
+// schemaNameRE strips anything that isn't a valid unquoted Postgres
+// identifier character out of a generated schema name (t.Name() can
+// contain "/" for subtests, spaces from t.Run names with spaces, etc).
+var schemaNameRE = regexp.MustCompile(`[^a-zA-Z0-9_]+`)
+
+// newPostgresSQLService opens a real Postgres connection via bun/pgdriver,
+// isolated into its own, freshly created schema (named after the test plus
+// a random suffix) rather than the shared "public" schema. That isolation
+// is what makes it safe for tests using this to run under t.Parallel():
+// every earlier version of this helper drop-and-recreated a literal
+// "widgets" table shared by every test, which made real concurrent runs
+// corrupt each other's data. It shares fakeSQLService's shape (Ping/Client
+// over a *bun.DB) since that wrapper never actually depended on SQLite —
+// only the DSN and dialect differ here.
+// defaultPoolSize is deliberately small — see the comment inside
+// newPostgresSQLServiceInSchema on the connection budget this leaves under
+// t.Parallel(). Only the load test (which never runs under t.Parallel())
+// asks for a larger one, via newPostgresSQLServiceWithPool.
+const defaultPoolSize = 4
+
 func newPostgresSQLService(t *testing.T, dsn string) *fakeSQLService {
 	t.Helper()
-	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+	return newPostgresSQLServiceWithPool(t, dsn, defaultPoolSize)
+}
+
+func newPostgresSQLServiceWithPool(t *testing.T, dsn string, maxConns int) *fakeSQLService {
+	t.Helper()
+	schema := schemaNameRE.ReplaceAllString(t.Name(), "_")
+	if len(schema) > 40 { // Postgres identifiers cap at 63 bytes; leave room for the suffix
+		schema = schema[:40]
+	}
+	schema = fmt.Sprintf("it_%s_%d", schema, time.Now().UnixNano())
+	return newPostgresSQLServiceInSchema(t, dsn, schema, maxConns)
+}
+
+// newPostgresSQLServicePublicSchema is the one deliberate exception to
+// newPostgresSQLService's isolation: the real Debezium connector (see
+// local/docker-compose) is configured to watch schema.include.list=public
+// specifically, so the one test that depends on the connector actually
+// capturing its changes (integration_debezium_test.go) has to use the
+// real "public" schema, not an isolated one Debezium was never told to
+// watch. Every other integration test doesn't care which schema it's in,
+// since it publishes its own synthetic CDC envelope rather than relying
+// on the real connector.
+func newPostgresSQLServicePublicSchema(t *testing.T, dsn string) *fakeSQLService {
+	t.Helper()
+	return newPostgresSQLServiceInSchema(t, dsn, "public", defaultPoolSize)
+}
+
+func newPostgresSQLServiceInSchema(t *testing.T, dsn string, schema string, maxConns int) *fakeSQLService {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if schema != "public" {
+		admin := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+		defer admin.Close()
+		if _, err := admin.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS "+pgQuoteIdent(schema)); err != nil {
+			t.Fatalf("creating schema %s: %v", schema, err)
+		}
+		t.Cleanup(func() {
+			admin := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+			defer admin.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := admin.ExecContext(ctx, "DROP SCHEMA IF EXISTS "+pgQuoteIdent(schema)+" CASCADE"); err != nil {
+				t.Logf("dropping schema %s during cleanup: %v", schema, err)
+			}
+		})
+	}
+
+	scopedDSN, err := withSearchPath(dsn, schema)
+	if err != nil {
+		t.Fatalf("building scoped DSN for schema %s: %v", schema, err)
+	}
+	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(scopedDSN)))
 	// Bounded on purpose: database/sql defaults to an unbounded pool, and
-	// Postgres's own default max_connections is commonly 100 shared across
-	// every client (this stack alone runs two Postgres instances, each
-	// with their own pool, plus Debezium's replication connection). A
-	// concurrent workload without this cap can exhaust the server's
-	// connection limit outright — found by the load test hammering
-	// UpdateByID through a 100-goroutine pool with no cap set.
-	sqldb.SetMaxOpenConns(20)
-	sqldb.SetMaxIdleConns(20)
+	// this stack's Postgres instances are both configured with the default
+	// max_connections=100 (verified, not assumed — see the commit that
+	// introduced this comment). With every test now running under
+	// t.Parallel(), up to $(go test -parallel) tests can be mid-test at
+	// once, each holding up to two of these pools (write + read) — at this
+	// machine's default parallelism (GOMAXPROCS=10) that's up to 20 pools
+	// live simultaneously, so defaultPoolSize has to stay small (4), and
+	// the Makefile pins -parallel explicitly rather than trusting whatever
+	// GOMAXPROCS happens to be on a given machine, so this budget holds
+	// everywhere the Makefile target is used. maxConns lets the load test
+	// opt into a much larger pool for its own 100-worker UpdateByID
+	// benchmark, since that test runs alone and never under t.Parallel().
+	sqldb.SetMaxOpenConns(maxConns)
+	sqldb.SetMaxIdleConns(maxConns)
 	db := bun.NewDB(sqldb, pgdialect.New())
 	t.Cleanup(func() { _ = db.Close() })
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
-		t.Fatalf("pinging postgres at %s: %v", dsn, err)
+		t.Fatalf("pinging postgres at %s (schema %s): %v", dsn, schema, err)
 	}
 
-	// Idempotent: real Postgres data persists across test runs, unlike the
-	// in-memory SQLite fakes, so drop and recreate rather than assuming a
-	// clean table.
-	if _, err := db.NewDropTable().Model((*widget)(nil)).IfExists().Exec(ctx); err != nil {
-		t.Fatalf("dropping widgets table: %v", err)
-	}
-	if _, err := db.NewDropTable().Model((*domains.ProcessedEvent)(nil)).IfExists().Exec(ctx); err != nil {
-		t.Fatalf("dropping processed_events table: %v", err)
+	// public is shared and reused across runs, so stay idempotent there;
+	// an isolated schema is always brand new, so a plain create is enough.
+	if schema == "public" {
+		if _, err := db.NewDropTable().Model((*widget)(nil)).IfExists().Exec(ctx); err != nil {
+			t.Fatalf("dropping widgets table: %v", err)
+		}
+		if _, err := db.NewDropTable().Model((*domains.ProcessedEvent)(nil)).IfExists().Exec(ctx); err != nil {
+			t.Fatalf("dropping processed_events table: %v", err)
+		}
 	}
 	if _, err := db.NewCreateTable().Model((*widget)(nil)).Exec(ctx); err != nil {
 		t.Fatalf("creating widgets table: %v", err)
@@ -126,6 +201,28 @@ func newPostgresSQLService(t *testing.T, dsn string) *fakeSQLService {
 	}
 
 	return &fakeSQLService{db: db}
+}
+
+// pgQuoteIdent double-quotes a Postgres identifier we generated ourselves
+// (from a sanitized test name, [a-zA-Z0-9_] only) — not untrusted input,
+// but quoting it is free and avoids any surprise with a reserved word.
+func pgQuoteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// withSearchPath returns dsn with its search_path query parameter set to
+// schema, verified against a live pgdriver connection (see the commit
+// this helper was introduced in) to actually scope every query issued
+// over that connection to that schema.
+func withSearchPath(dsn, schema string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("search_path", schema)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 // realKafkaBroker is a real, minimal domains.MessageBrokerService backed by

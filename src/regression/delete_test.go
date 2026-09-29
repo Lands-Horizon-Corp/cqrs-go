@@ -8,6 +8,7 @@ import (
 )
 
 func TestDeleteByID_HappyPath_RemovesRow(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "w1", Name: "n"})
@@ -22,6 +23,7 @@ func TestDeleteByID_HappyPath_RemovesRow(t *testing.T) {
 }
 
 func TestDeleteMany_HappyPath_RemovesOnlyGivenIDs(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "a", Name: "n"})
@@ -45,6 +47,7 @@ func TestDeleteMany_HappyPath_RemovesOnlyGivenIDs(t *testing.T) {
 }
 
 func TestDeleteByID_SadPath_NonexistentIDReturnsErrNoRows(t *testing.T) {
+	t.Parallel()
 	c, _ := newTestCQRS(t)
 	err := c.DeleteByID(context.Background(), "missing")
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -53,6 +56,7 @@ func TestDeleteByID_SadPath_NonexistentIDReturnsErrNoRows(t *testing.T) {
 }
 
 func TestDeleteByID_SadPath_DBErrorIsWrapped(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	seedWidget(t, c, widget{ID: "w1", Name: "n"})
 	dropWidgetsTable(t, write)
@@ -67,6 +71,7 @@ func TestDeleteByID_SadPath_DBErrorIsWrapped(t *testing.T) {
 }
 
 func TestDeleteMany_SadPath_DBErrorIsWrapped(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	seedWidget(t, c, widget{ID: "w1", Name: "n"})
 	dropWidgetsTable(t, write)
@@ -77,6 +82,7 @@ func TestDeleteMany_SadPath_DBErrorIsWrapped(t *testing.T) {
 }
 
 func TestDeleteMany_SadPath_EmptyInputIsANoOp(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "w1", Name: "n"})
@@ -95,6 +101,7 @@ func TestDeleteMany_SadPath_EmptyInputIsANoOp(t *testing.T) {
 }
 
 func TestDeleteByID_PoisonPill_AdversarialIDIsSafeNoOp(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "w1", Name: "n"})

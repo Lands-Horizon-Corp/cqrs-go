@@ -94,12 +94,21 @@ func TestIntegration_Chaos_PostgresWriteRestartRecoversAutomatically(t *testing.
 		return err == nil
 	}, "expected Create to eventually succeed again once postgres-write is back")
 
-	if _, ok := readWidgetFrom(t, write, "before-restart"); !ok {
-		t.Error("expected the pre-restart row to have survived the restart (it's a real restart, not a data wipe)")
-	}
-	if _, ok := readWidgetFrom(t, write, "after-restart"); !ok {
-		t.Error("expected the post-restart row to exist")
-	}
+	// A single one-shot read right after restart can hit a connection the
+	// pool hasn't finished recycling yet, even once pg_isready reports
+	// healthy and even once some other query has already succeeded (with
+	// SetMaxOpenConns(20) there are several distinct pooled connections,
+	// and database/sql doesn't guarantee the very next one handed out is
+	// the one already known-good) — so these reads get the same retry
+	// treatment as the write above, rather than a single flaky attempt.
+	waitForCondition(t, 15*time.Second, func() bool {
+		_, ok := readWidgetFrom(t, write, "before-restart")
+		return ok
+	}, "expected the pre-restart row to have survived the restart (it's a real restart, not a data wipe)")
+	waitForCondition(t, 15*time.Second, func() bool {
+		_, ok := readWidgetFrom(t, write, "after-restart")
+		return ok
+	}, "expected the post-restart row to exist")
 }
 
 // TestIntegration_Chaos_KafkaRestartMidStream restarts the real kafka

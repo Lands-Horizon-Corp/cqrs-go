@@ -84,6 +84,7 @@ func newBroadcastIntegrationHarness(t *testing.T, topicSuffix string) (*cqrs.CQR
 // why that step still doesn't exist), consumed by Run() over a real Kafka
 // connection, applied to a second real Postgres database.
 func TestIntegration_HappyPath_RealPostgresWriteThenRealKafkaAlignsRealPostgresRead(t *testing.T) {
+	t.Parallel()
 	c, write, read, broker, broadcast, _ := newIntegrationHarness(t, "happy")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -142,6 +143,7 @@ func TestIntegration_HappyPath_RealPostgresWriteThenRealKafkaAlignsRealPostgresR
 // real Postgres instead of SQLite — Postgres has its own NULL/type
 // coercion behavior that the SQLite-backed suite can't verify.
 func TestIntegration_PoisonPill_ZeroAndNilValuesSurviveRealPostgresRoundTrip(t *testing.T) {
+	t.Parallel()
 	c, _, read, broker, broadcast, _ := newIntegrationHarness(t, "poison")
 
 	ctx, cancel := context.WithCancel(context.Background())

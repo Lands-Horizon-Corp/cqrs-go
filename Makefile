@@ -6,8 +6,10 @@ COMPOSE := cd local/docker-compose && docker compose
 test: test-unit
 
 ## test-unit: the normal suite — no Docker, no network, safe in CI.
+## Every test runs under t.Parallel() (each on its own isolated in-memory
+## SQLite DB, so there's nothing for them to contend over).
 test-unit:
-	go test ./...
+	go test -parallel 8 ./...
 
 ## docker-up: starts local/docker-compose and blocks until every long-running
 ## service reports healthy (docker compose --wait) — not just "started", so
@@ -33,8 +35,18 @@ docker-logs:
 ## against those real services. Because docker-up blocks on --wait,
 ## a pass here means the tests genuinely exercised the real local
 ## infrastructure, not a silent skip.
+##
+## Every test except the two chaos tests (which restart real containers —
+## see integration_chaos_test.go) runs under t.Parallel(), each in its own
+## Postgres schema so they can't corrupt each other's tables. -parallel is
+## pinned to 8 explicitly (not left to default GOMAXPROCS) because the
+## per-test connection pool size is budgeted against this exact number —
+## see newPostgresSQLServiceInSchema's comment in integration_helpers_test.go
+## before raising it. Go's test runner guarantees the non-parallel chaos
+## tests run to full completion before any parallel test's body starts
+## (verified empirically, not assumed), so this is safe as-is.
 test-integration: docker-up
-	go test -tags=integration ./src/regression/... -run TestIntegration -v
+	go test -tags=integration ./src/regression/... -run TestIntegration -parallel 8 -v
 
 ## test-all: unit suite, then the real integration suite.
 test-all: test-unit test-integration

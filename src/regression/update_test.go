@@ -8,6 +8,7 @@ import (
 )
 
 func TestUpdateByID_HappyPath_ChangesPersist(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "w1", Name: "old", Active: true, Featured: new(true)})
@@ -30,6 +31,7 @@ func TestUpdateByID_HappyPath_ChangesPersist(t *testing.T) {
 // so setting Active: false in the struct you pass in DOES persist as
 // false here.
 func TestUpdateByID_NonPointerBool_FalseActuallyPersists(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "w1", Name: "n", Active: true})
@@ -54,6 +56,7 @@ func TestUpdateByID_NonPointerBool_FalseActuallyPersists(t *testing.T) {
 // column is overwritten with NULL, even though a nil pointer could
 // conceptually have meant "I didn't set this."
 func TestUpdateByID_PointerBool_NilOverwritesToNULL(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "w1", Name: "n", Featured: new(true), Notes: new("hi"), Priority: new(5)})
@@ -82,6 +85,7 @@ func TestUpdateByID_PointerBool_NilOverwritesToNULL(t *testing.T) {
 // nil *bool (see zerovalue_test.go), and it persists as false here, not
 // NULL.
 func TestUpdateByID_PointerBool_ExplicitFalseDistinctFromNil(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "w1", Name: "n", Featured: new(true)})
@@ -103,6 +107,7 @@ func TestUpdateByID_PointerBool_ExplicitFalseDistinctFromNil(t *testing.T) {
 }
 
 func TestUpdateByID_SadPath_NonexistentIDAndValidation(t *testing.T) {
+	t.Parallel()
 	t.Run("Nonexistent ID Returns ErrNoRows", func(t *testing.T) {
 		c, _ := newTestCQRS(t)
 		_, err := c.UpdateByID(context.Background(), "missing", widget{ID: "missing", Name: "n"})
@@ -139,6 +144,7 @@ func TestUpdateByID_SadPath_NonexistentIDAndValidation(t *testing.T) {
 }
 
 func TestUpdateByID_HappyPath_NilToResourceReturnsNilWithoutError(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	c := newCQRSNoResource(t, write)
 	ctx := context.Background()
@@ -162,6 +168,7 @@ func TestUpdateByID_HappyPath_NilToResourceReturnsNilWithoutError(t *testing.T) 
 // PATCH-style request body) and forgets that UpdateByID is a full-struct
 // write. Every column not explicitly set gets reset to its zero value.
 func TestUpdateByID_PoisonPill_ForgottenFieldsGetClobbered(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 	seedWidget(t, c, widget{
@@ -192,6 +199,7 @@ func TestUpdateByID_PoisonPill_ForgottenFieldsGetClobbered(t *testing.T) {
 }
 
 func TestUpdateMany_HappyPath_UpdatesAllRowsInOneStatement(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "a", Name: "old-a", Active: false})
@@ -217,6 +225,7 @@ func TestUpdateMany_HappyPath_UpdatesAllRowsInOneStatement(t *testing.T) {
 }
 
 func TestUpdateMany_SadPath_EmptyInputIsANoOp(t *testing.T) {
+	t.Parallel()
 	c, _ := newTestCQRS(t)
 	res, err := c.UpdateMany(context.Background(), nil)
 	if err != nil {
@@ -228,6 +237,7 @@ func TestUpdateMany_SadPath_EmptyInputIsANoOp(t *testing.T) {
 }
 
 func TestUpdateMany_SadPath_ValidationFailureBlocksWholeBatch(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "a", Name: "original"})
@@ -249,6 +259,7 @@ func TestUpdateMany_SadPath_ValidationFailureBlocksWholeBatch(t *testing.T) {
 // not-found signal for IDs that don't exist — consistent with DeleteMany's
 // existing behavior for the same reason (no individual per-row result).
 func TestUpdateMany_PoisonPill_MissingIDsAreSilentlyIgnored(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "a", Name: "original"})
@@ -269,6 +280,7 @@ func TestUpdateMany_PoisonPill_MissingIDsAreSilentlyIgnored(t *testing.T) {
 }
 
 func TestUpdateMany_HappyPath_NilToResourceReturnsNilResponses(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	c := newCQRSNoResource(t, write)
 	ctx := context.Background()

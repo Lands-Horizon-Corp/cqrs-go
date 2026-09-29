@@ -14,6 +14,7 @@ import (
 // non-pointer bool field decodes to the exact same Go value (false)
 // whether the JSON omitted the key entirely or explicitly sent false.
 func TestZeroValue_BoolCannotDistinguishAbsentFromFalse(t *testing.T) {
+	t.Parallel()
 	var absent widget
 	if err := sonic.Unmarshal([]byte(`{"id":"w1","name":"n"}`), &absent); err != nil {
 		t.Fatalf("unmarshal (absent): %v", err)
@@ -38,6 +39,7 @@ func TestZeroValue_BoolCannotDistinguishAbsentFromFalse(t *testing.T) {
 // JSON explicitly sends that zero value. This holds across every pointer
 // type on widget, not just *bool.
 func TestZeroValue_PointerFieldsDistinguishAbsentFromExplicitZero(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		json  string
@@ -126,6 +128,7 @@ func TestZeroValue_PointerFieldsDistinguishAbsentFromExplicitZero(t *testing.T) 
 // distinguishing "active was really sent as false" from "active was
 // missing from a malformed/partial message" — both look identical.
 func TestZeroValue_PoisonPill_CDCEnvelopeWithMissingBoolField(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{
 		"event_id": "evt-1",
 		"change_type": 1,

@@ -69,9 +69,14 @@ func runDebeziumBridge[T any](ctx context.Context, source domains.MessageBrokerS
 }
 
 func TestIntegration_HappyPath_RealDebeziumThroughBridgeAlignsRealPostgresRead(t *testing.T) {
+	t.Parallel()
 	skipUnlessInfraReachable(t)
 
-	write := newPostgresSQLService(t, itWriteDSN)
+	// write specifically must stay on the literal "public" schema — see
+	// newPostgresSQLServicePublicSchema's doc comment for why. read has no
+	// such constraint (nothing external watches it), so it uses the
+	// normal isolated-schema default like every other test.
+	write := newPostgresSQLServicePublicSchema(t, itWriteDSN)
 	read := newPostgresSQLService(t, itReadDSN)
 
 	destTopic := fmt.Sprintf("cqrs-it-bridge-%d", time.Now().UnixNano())

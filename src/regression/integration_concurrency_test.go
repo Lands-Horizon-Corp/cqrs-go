@@ -54,6 +54,7 @@ func publishEnvelope(t *testing.T, broker *realKafkaBroker, ctx context.Context,
 // no data races (run this file with -race) and no lost/duplicated
 // broadcasts.
 func TestIntegration_HappyPath_ConcurrentCreatesAcrossManyEntities(t *testing.T) {
+	t.Parallel()
 	const n = 25
 	h := newCDCHarnessIT(t, "concurrent-creates", n)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -113,6 +114,7 @@ func TestIntegration_HappyPath_ConcurrentCreatesAcrossManyEntities(t *testing.T)
 // one wins; this asserts that invariant holds under real concurrent load
 // and that only the winner's change ever reaches the read DB.
 func TestIntegration_HappyPath_ConcurrentCreateRaceOnSameID(t *testing.T) {
+	t.Parallel()
 	const racers = 8
 	h := newCDCHarnessIT(t, "create-race", 1)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -169,6 +171,7 @@ func TestIntegration_HappyPath_ConcurrentCreateRaceOnSameID(t *testing.T) {
 // what real Debezium would have captured — then asserts the read DB
 // converges to it too.
 func TestIntegration_HappyPath_ConcurrentUpdatesConvergeToActualFinalState(t *testing.T) {
+	t.Parallel()
 	const racers = 8
 	h := newCDCHarnessIT(t, "update-race", 1)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -222,6 +225,7 @@ func TestIntegration_HappyPath_ConcurrentUpdatesConvergeToActualFinalState(t *te
 // since a rolled-back write never appears in Postgres's WAL, so real
 // Debezium could never produce an event for it either.
 func TestIntegration_PoisonPill_FailedWritesNeverReachReadDB(t *testing.T) {
+	t.Parallel()
 	const good = 15
 	h := newCDCHarnessIT(t, "poison-concurrent", good)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -296,6 +300,7 @@ func TestIntegration_PoisonPill_FailedWritesNeverReachReadDB(t *testing.T) {
 // entity ends deleted, so the final-state assertion is unambiguous
 // regardless of interleaving.
 func TestIntegration_HappyPath_HighConcurrencyBatchCoalescing(t *testing.T) {
+	t.Parallel()
 	const k = 12
 	h := newCDCHarnessIT(t, "coalesce", 20)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -376,11 +381,20 @@ type cdcHarnessIT struct {
 // Deleted callbacks included since every test in this file exercises the
 // full lifecycle, not just Create.
 func newCDCHarnessIT(t *testing.T, topicSuffix string, batchSize int) *cdcHarnessIT {
+	return newCDCHarnessITWithPool(t, topicSuffix, batchSize, defaultPoolSize)
+}
+
+// newCDCHarnessITWithPool is newCDCHarnessIT with a caller-chosen
+// connection pool size — used by the load test (see load_test.go), which
+// needs far more than defaultPoolSize to get a meaningful reading out of
+// its 100-worker UpdateByID benchmark, and can afford it because it never
+// runs under t.Parallel().
+func newCDCHarnessITWithPool(t *testing.T, topicSuffix string, batchSize int, maxConns int) *cdcHarnessIT {
 	t.Helper()
 	skipUnlessInfraReachable(t)
 
-	write := newPostgresSQLService(t, itWriteDSN)
-	read := newPostgresSQLService(t, itReadDSN)
+	write := newPostgresSQLServiceWithPool(t, itWriteDSN, maxConns)
+	read := newPostgresSQLServiceWithPool(t, itReadDSN, maxConns)
 	topic := fmt.Sprintf("cqrs-it-%s-%d", topicSuffix, time.Now().UnixNano())
 	broker := newRealKafkaBroker(t, itKafkaAddr, topic)
 	broadcast := newFakeBroadcastService()

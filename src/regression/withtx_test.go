@@ -20,6 +20,7 @@ func withTx(t *testing.T, write *fakeSQLService, fn func(ctx context.Context, tx
 }
 
 func TestCreateWithTx_HappyPath_InsertsWithinTransaction(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
@@ -39,6 +40,7 @@ func TestCreateWithTx_HappyPath_InsertsWithinTransaction(t *testing.T) {
 }
 
 func TestCreateWithTx_SadPath_ValidationFailureBlocksInsert(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 
 	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
@@ -54,6 +56,7 @@ func TestCreateWithTx_SadPath_ValidationFailureBlocksInsert(t *testing.T) {
 }
 
 func TestCreateWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	dropWidgetsTable(t, write)
 
@@ -67,6 +70,7 @@ func TestCreateWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
 }
 
 func TestCreateWithTx_HappyPath_NilToResourceReturnsNilWithoutError(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	c := newCQRSNoResource(t, write)
 
@@ -83,6 +87,7 @@ func TestCreateWithTx_HappyPath_NilToResourceReturnsNilWithoutError(t *testing.T
 }
 
 func TestCreateManyWithTx_HappyPath_InsertsAllWithinTransaction(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
@@ -106,6 +111,7 @@ func TestCreateManyWithTx_HappyPath_InsertsAllWithinTransaction(t *testing.T) {
 }
 
 func TestCreateManyWithTx_SadPath_EmptyInputIsANoOp(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
 		res, err := c.CreateManyWithTx(ctx, tx, nil)
@@ -120,6 +126,7 @@ func TestCreateManyWithTx_SadPath_EmptyInputIsANoOp(t *testing.T) {
 }
 
 func TestCreateManyWithTx_SadPath_ValidationFailureBlocksWholeBatch(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
 		_, err := c.CreateManyWithTx(ctx, tx, []widget{{ID: "a", Name: "ok"}, {ID: "b", Name: ""}})
@@ -131,6 +138,7 @@ func TestCreateManyWithTx_SadPath_ValidationFailureBlocksWholeBatch(t *testing.T
 }
 
 func TestCreateManyWithTx_SadPath_DBErrorOnDuplicateID(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
 		_, err := c.CreateManyWithTx(ctx, tx, []widget{{ID: "dup", Name: "one"}, {ID: "dup", Name: "two"}})
@@ -142,6 +150,7 @@ func TestCreateManyWithTx_SadPath_DBErrorOnDuplicateID(t *testing.T) {
 }
 
 func TestCreateManyWithTx_HappyPath_NilToResourceReturnsNilResponses(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	c := newCQRSNoResource(t, write)
 
@@ -158,6 +167,7 @@ func TestCreateManyWithTx_HappyPath_NilToResourceReturnsNilResponses(t *testing.
 }
 
 func TestUpdateByIDWithTx_HappyPath_ChangesPersist(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	seedWidget(t, c, widget{ID: "w1", Name: "old"})
 
@@ -178,6 +188,7 @@ func TestUpdateByIDWithTx_HappyPath_ChangesPersist(t *testing.T) {
 }
 
 func TestUpdateByIDWithTx_SadPath_NonexistentIDReturnsErrNoRows(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
 		_, err := c.UpdateByIDWithTx(ctx, tx, "missing", widget{ID: "missing", Name: "n"})
@@ -189,6 +200,7 @@ func TestUpdateByIDWithTx_SadPath_NonexistentIDReturnsErrNoRows(t *testing.T) {
 }
 
 func TestUpdateByIDWithTx_SadPath_ValidationFailureBlocksUpdate(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	seedWidget(t, c, widget{ID: "w1", Name: "original"})
 
@@ -205,6 +217,7 @@ func TestUpdateByIDWithTx_SadPath_ValidationFailureBlocksUpdate(t *testing.T) {
 }
 
 func TestUpdateByIDWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	seedWidget(t, c, widget{ID: "w1", Name: "n"})
 	dropWidgetsTable(t, write)
@@ -219,6 +232,7 @@ func TestUpdateByIDWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
 }
 
 func TestUpdateByIDWithTx_HappyPath_NilToResourceReturnsNilWithoutError(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	c := newCQRSNoResource(t, write)
 	seedWidget(t, c, widget{ID: "w1", Name: "n"})
@@ -236,6 +250,7 @@ func TestUpdateByIDWithTx_HappyPath_NilToResourceReturnsNilWithoutError(t *testi
 }
 
 func TestDeleteByIDWithTx_HappyPath_RemovesRow(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	seedWidget(t, c, widget{ID: "w1", Name: "n"})
 
@@ -249,6 +264,7 @@ func TestDeleteByIDWithTx_HappyPath_RemovesRow(t *testing.T) {
 }
 
 func TestDeleteByIDWithTx_SadPath_NonexistentIDReturnsErrNoRows(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
 		return c.DeleteByIDWithTx(ctx, tx, "missing")
@@ -259,6 +275,7 @@ func TestDeleteByIDWithTx_SadPath_NonexistentIDReturnsErrNoRows(t *testing.T) {
 }
 
 func TestDeleteManyWithTx_HappyPath_RemovesGivenIDs(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	seedWidget(t, c, widget{ID: "a", Name: "n"})
 	seedWidget(t, c, widget{ID: "b", Name: "n"})
@@ -276,6 +293,7 @@ func TestDeleteManyWithTx_HappyPath_RemovesGivenIDs(t *testing.T) {
 }
 
 func TestDeleteManyWithTx_SadPath_EmptyInputIsANoOp(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	seedWidget(t, c, widget{ID: "a", Name: "n"})
 
@@ -292,6 +310,7 @@ func TestDeleteManyWithTx_SadPath_EmptyInputIsANoOp(t *testing.T) {
 }
 
 func TestDeleteByIDWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	seedWidget(t, c, widget{ID: "w1", Name: "n"})
 	dropWidgetsTable(t, write)
@@ -305,6 +324,7 @@ func TestDeleteByIDWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
 }
 
 func TestDeleteManyWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	seedWidget(t, c, widget{ID: "w1", Name: "n"})
 	dropWidgetsTable(t, write)
@@ -318,6 +338,7 @@ func TestDeleteManyWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
 }
 
 func TestUpdateManyWithTx_HappyPath_UpdatesAllRowsWithinTransaction(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	seedWidget(t, c, widget{ID: "a", Name: "old-a"})
 	seedWidget(t, c, widget{ID: "b", Name: "old-b"})
@@ -344,6 +365,7 @@ func TestUpdateManyWithTx_HappyPath_UpdatesAllRowsWithinTransaction(t *testing.T
 }
 
 func TestUpdateManyWithTx_SadPath_EmptyInputIsANoOp(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
 		res, err := c.UpdateManyWithTx(ctx, tx, nil)
@@ -358,6 +380,7 @@ func TestUpdateManyWithTx_SadPath_EmptyInputIsANoOp(t *testing.T) {
 }
 
 func TestUpdateManyWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	seedWidget(t, c, widget{ID: "a", Name: "n"})
 	dropWidgetsTable(t, write)
@@ -372,6 +395,7 @@ func TestUpdateManyWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
 }
 
 func TestUpdateManyWithTx_HappyPath_NilToResourceReturnsNilResponses(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	c := newCQRSNoResource(t, write)
 	seedWidget(t, c, widget{ID: "a", Name: "old"})

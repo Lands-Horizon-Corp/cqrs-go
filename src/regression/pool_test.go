@@ -10,6 +10,7 @@ import (
 )
 
 func TestBufferPool_HappyPath_GetAndPut(t *testing.T) {
+	t.Parallel()
 	pool := utils.NewBufferPool[int]()
 	buf := pool.Get()
 	if buf == nil {
@@ -34,6 +35,7 @@ func TestBufferPool_HappyPath_GetAndPut(t *testing.T) {
 }
 
 func TestBufferPool_SadPath_NilAndOversized(t *testing.T) {
+	t.Parallel()
 	pool := utils.NewBufferPool[byte]()
 
 	t.Run("Nil Put", func(t *testing.T) {
@@ -57,6 +59,7 @@ func TestBufferPool_SadPath_NilAndOversized(t *testing.T) {
 }
 
 func TestBufferPool_PoisonPill_DataIsolation(t *testing.T) {
+	t.Parallel()
 	type SensitiveData struct {
 		SecretKey string
 		IsPoison  bool
@@ -80,6 +83,7 @@ func TestBufferPool_PoisonPill_DataIsolation(t *testing.T) {
 }
 
 func TestBufferPool_ConcurrentStress(t *testing.T) {
+	t.Parallel()
 	pool := utils.NewBufferPool[int]()
 	var wg sync.WaitGroup
 
@@ -112,6 +116,7 @@ func TestBufferPool_ConcurrentStress(t *testing.T) {
 // --- MapPool Tests ---
 
 func TestMapPool_HappyPath_GetAndPut(t *testing.T) {
+	t.Parallel()
 	pool := utils.NewMapPool[string, int]()
 
 	m := pool.Get()
@@ -137,6 +142,7 @@ func TestMapPool_HappyPath_GetAndPut(t *testing.T) {
 }
 
 func TestMapPool_SadPath_NilAndOversized(t *testing.T) {
+	t.Parallel()
 	pool := utils.NewMapPool[int, string]()
 
 	t.Run("Nil Put", func(t *testing.T) {
@@ -159,6 +165,7 @@ func TestMapPool_SadPath_NilAndOversized(t *testing.T) {
 }
 
 func TestMapPool_PoisonPill_KeyLeakPrevention(t *testing.T) {
+	t.Parallel()
 	pool := utils.NewMapPool[string, any]()
 
 	m1 := pool.Get()
@@ -181,6 +188,7 @@ func TestMapPool_PoisonPill_KeyLeakPrevention(t *testing.T) {
 }
 
 func TestMapPool_ConcurrentStress(t *testing.T) {
+	t.Parallel()
 	pool := utils.NewMapPool[string, int]()
 	var wg sync.WaitGroup
 	workers := 50

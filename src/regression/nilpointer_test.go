@@ -25,6 +25,7 @@ type ptrIDEntity struct {
 }
 
 func TestNilPointer_FieldValueAt_NilPointerIDIsAbsentNotTheStringNil(t *testing.T) {
+	t.Parallel()
 	idx := utils.BunColumnFieldIndex[ptrIDEntity]("id")
 	if idx < 0 {
 		t.Fatalf("expected to resolve the id field, got %d", idx)
@@ -44,6 +45,7 @@ func TestNilPointer_FieldValueAt_NilPointerIDIsAbsentNotTheStringNil(t *testing.
 // TestNilPointer_CreateUpdateDelete_AllFieldsNilNeverPanics sweeps every
 // pointer field left nil through the full write-path lifecycle.
 func TestNilPointer_CreateUpdateDelete_AllFieldsNilNeverPanics(t *testing.T) {
+	t.Parallel()
 	c, _ := newTestCQRS(t)
 	ctx := context.Background()
 
@@ -61,6 +63,7 @@ func TestNilPointer_CreateUpdateDelete_AllFieldsNilNeverPanics(t *testing.T) {
 // TestNilPointer_CreateUpdateDelete_AllFieldsSetNeverPanics sweeps every
 // pointer field populated through the same lifecycle, as the flip side.
 func TestNilPointer_CreateUpdateDelete_AllFieldsSetNeverPanics(t *testing.T) {
+	t.Parallel()
 	c, _ := newTestCQRS(t)
 	ctx := context.Background()
 	exp := time.Now().UTC()
@@ -86,6 +89,7 @@ func TestNilPointer_CreateUpdateDelete_AllFieldsSetNeverPanics(t *testing.T) {
 // broadcast), which is the part of the codebase that reflects over
 // arbitrary struct fields and is most exposed to a nil-handling bug.
 func TestNilPointer_CDCPath_MixedNilAndSetFieldsNeverPanics(t *testing.T) {
+	t.Parallel()
 	h := newCDCHarness(t, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -131,6 +135,7 @@ func TestNilPointer_CDCPath_MixedNilAndSetFieldsNeverPanics(t *testing.T) {
 // set at all — both are nil function values / nil slices flowing through
 // handleEvent.
 func TestNilPointer_NilSlicesAndDispatchNeverPanic(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	c := cqrsWithNilEventsCallback(t, write)
 

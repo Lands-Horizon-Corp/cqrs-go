@@ -7,6 +7,7 @@ import (
 )
 
 func TestCreate_HappyPath_InsertsAndReturnsResource(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 
@@ -42,6 +43,7 @@ func TestCreate_HappyPath_InsertsAndReturnsResource(t *testing.T) {
 }
 
 func TestCreate_HappyPath_NilToResourceReturnsNilWithoutError(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	c := newCQRSNoResource(t, write)
 	res, err := c.Create(context.Background(), widget{ID: "w1", Name: "gadget"})
@@ -54,6 +56,7 @@ func TestCreate_HappyPath_NilToResourceReturnsNilWithoutError(t *testing.T) {
 }
 
 func TestCreate_SadPath_ValidationAndConstraintFailures(t *testing.T) {
+	t.Parallel()
 	t.Run("Validation Failure Blocks Insert", func(t *testing.T) {
 		c, write := newTestCQRS(t)
 		ctx := context.Background()
@@ -87,6 +90,7 @@ func TestCreate_SadPath_ValidationAndConstraintFailures(t *testing.T) {
 }
 
 func TestCreate_PoisonPill_ZeroAndAbsentValues(t *testing.T) {
+	t.Parallel()
 	t.Run("Zero Value Bool Persists As False, Not Dropped", func(t *testing.T) {
 		c, write := newTestCQRS(t)
 		ctx := context.Background()
@@ -170,6 +174,7 @@ func TestCreate_PoisonPill_ZeroAndAbsentValues(t *testing.T) {
 }
 
 func TestCreateMany_HappyPath_InsertsAllAndReturnsResources(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 
@@ -194,6 +199,7 @@ func TestCreateMany_HappyPath_InsertsAllAndReturnsResources(t *testing.T) {
 }
 
 func TestCreateMany_SadPath_EmptyInputIsANoOp(t *testing.T) {
+	t.Parallel()
 	c, _ := newTestCQRS(t)
 	res, err := c.CreateMany(context.Background(), nil)
 	if err != nil {
@@ -205,6 +211,7 @@ func TestCreateMany_SadPath_EmptyInputIsANoOp(t *testing.T) {
 }
 
 func TestCreateMany_SadPath_ValidationFailureBlocksWholeBatch(t *testing.T) {
+	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 
@@ -226,6 +233,7 @@ func TestCreateMany_SadPath_ValidationFailureBlocksWholeBatch(t *testing.T) {
 }
 
 func TestCreateMany_SadPath_DBErrorOnDuplicateID(t *testing.T) {
+	t.Parallel()
 	c, _ := newTestCQRS(t)
 	ctx := context.Background()
 
@@ -239,6 +247,7 @@ func TestCreateMany_SadPath_DBErrorOnDuplicateID(t *testing.T) {
 }
 
 func TestCreateMany_HappyPath_NilToResourceReturnsNilResponses(t *testing.T) {
+	t.Parallel()
 	write := newFakeSQLService(t)
 	c := newCQRSNoResource(t, write)
 

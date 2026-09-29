@@ -19,6 +19,7 @@ import (
 // waiting on the ticker) rather than by reading the unexported cfg field —
 // this package only touches Batcher's public API.
 func TestBatcher_Defaults_BatchSizeIsOneHundred(t *testing.T) {
+	t.Parallel()
 	var (
 		mu       sync.Mutex
 		received [][]int
@@ -67,6 +68,7 @@ func TestBatcher_Defaults_BatchSizeIsOneHundred(t *testing.T) {
 // default BatchSize) must still get flushed once the default interval
 // elapses.
 func TestBatcher_Defaults_FlushIntervalIsFiftyMilliseconds(t *testing.T) {
+	t.Parallel()
 	var (
 		mu       sync.Mutex
 		received [][]int
@@ -95,6 +97,7 @@ func TestBatcher_Defaults_FlushIntervalIsFiftyMilliseconds(t *testing.T) {
 }
 
 func TestBatcher_HappyPath_BatchSizeAndStop(t *testing.T) {
+	t.Parallel()
 	var (
 		mu       sync.Mutex
 		received [][]int
@@ -139,6 +142,7 @@ func TestBatcher_HappyPath_BatchSizeAndStop(t *testing.T) {
 }
 
 func TestBatcher_HappyPath_TickerFlush(t *testing.T) {
+	t.Parallel()
 	var (
 		mu       sync.Mutex
 		received [][]int
@@ -177,6 +181,7 @@ func TestBatcher_HappyPath_TickerFlush(t *testing.T) {
 }
 
 func TestBatcher_HappyPath_ConcurrentPushes(t *testing.T) {
+	t.Parallel()
 	var totalProcessed int64
 
 	handler := func(ctx context.Context, batch []int) error {
@@ -218,6 +223,7 @@ func TestBatcher_HappyPath_ConcurrentPushes(t *testing.T) {
 }
 
 func TestBatcher_SadPath_HandlerErrorTriggersOnError(t *testing.T) {
+	t.Parallel()
 	var (
 		mu          sync.Mutex
 		capturedErr error
@@ -265,6 +271,7 @@ func TestBatcher_SadPath_HandlerErrorTriggersOnError(t *testing.T) {
 }
 
 func TestBatcher_SadPath_PushCancelledContext(t *testing.T) {
+	t.Parallel()
 	cfg := utils.BatcherConfig[int]{
 		BatchSize:     1,
 		BufferCap:     1,
@@ -290,6 +297,7 @@ func TestBatcher_SadPath_PushCancelledContext(t *testing.T) {
 // behavior by polling the observed output with a timeout, rather than
 // reaching into the unexported wg field to know when the worker exited.
 func TestBatcher_SadPath_WorkerContextCancelled(t *testing.T) {
+	t.Parallel()
 	var (
 		mu       sync.Mutex
 		received []int
@@ -343,6 +351,7 @@ func TestBatcher_SadPath_WorkerContextCancelled(t *testing.T) {
 // items that more than one BatchSize-sized chunk is still sitting in the
 // channel by the time cancellation is observed.
 func TestBatcher_HappyPath_ShutdownDrainFlushesMultipleSizeBatches(t *testing.T) {
+	t.Parallel()
 	var (
 		mu          sync.Mutex
 		received    [][]int
@@ -425,6 +434,7 @@ type Message struct {
 }
 
 func TestBatcher_PoisonPill_IsolationAndRecovery(t *testing.T) {
+	t.Parallel()
 	var (
 		mu             sync.Mutex
 		successBatches [][]Message
