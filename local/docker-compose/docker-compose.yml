@@ -1,0 +1,138 @@
+name: cqrs-go-local
+
+networks:
+  cqrs-net:
+    driver: bridge
+
+volumes:
+  postgres-write-data:
+  postgres-read-data:
+  kafka-data:
+  zookeeper-data:
+  zookeeper-log:
+
+services:
+  postgres-write:
+    image: pgvector/pgvector:pg16
+    container_name: cqrs-postgres-write
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cqrs_write
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+    ports:
+      - "15433:5432"
+    volumes:
+      - postgres-write-data:/var/lib/postgresql/data
+      - ./postgres-write-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cqrs_write"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [cqrs-net]
+
+  # --- Read side (query DB) -------------------------------------------
+  # Whatever consumes the CDC topic (this repo's CQRSImpl.Run, in a real
+  # deployment) writes here. No logical-replication settings needed.
+  postgres-read:
+    image: pgvector/pgvector:pg16
+    container_name: cqrs-postgres-read
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cqrs_read
+    ports:
+      - "15434:5432"
+    volumes:
+      - postgres-read-data:/var/lib/postgresql/data
+      - ./postgres-read-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cqrs_read"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [cqrs-net]
+
+  # --- Kafka + Debezium -------------------------------------------------
+  zookeeper:
+    image: debezium/zookeeper:2.7.3.Final
+    container_name: cqrs-zookeeper
+    restart: unless-stopped
+    ports:
+      - "12181:2181"
+    volumes:
+      - zookeeper-data:/zookeeper/data
+      - zookeeper-log:/zookeeper/log
+    networks: [cqrs-net]
+
+  kafka:
+    image: debezium/kafka:2.7.3.Final
+    container_name: cqrs-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    environment:
+      ZOOKEEPER_CONNECT: zookeeper:2181
+      # Two listeners: INTERNAL is what `connect` reaches over the Docker
+      # network (kafka:9092); EXTERNAL is what a host process (e.g. our Go
+      # integration test) reaches via the published port below. Kafka
+      # hands clients the advertised address for a listener after the
+      # initial connect, so without this split a host client can bootstrap
+      # but then fail trying to reach "kafka:9092", which it can't resolve.
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+    ports:
+      - "29092:29092"
+    volumes:
+      - kafka-data:/kafka/data
+    networks: [cqrs-net]
+
+  connect:
+    image: debezium/connect:2.7.3.Final
+    container_name: cqrs-connect
+    restart: unless-stopped
+    depends_on:
+      - kafka
+      - postgres-write
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: cqrs-connect
+      CONFIG_STORAGE_TOPIC: cqrs_connect_configs
+      OFFSET_STORAGE_TOPIC: cqrs_connect_offsets
+      STATUS_STORAGE_TOPIC: cqrs_connect_status
+    ports:
+      - "18083:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/connectors >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [cqrs-net]
+
+  # One-shot: registers the Postgres source connector once Connect is up,
+  # then exits. Re-running `docker compose up connector-register` any time
+  # is safe (idempotent — see register-connector.sh).
+  connector-register:
+    image: curlimages/curl:8.10.1
+    container_name: cqrs-connector-register
+    depends_on:
+      connect:
+        condition: service_healthy
+    volumes:
+      - ./debezium:/debezium:ro
+    entrypoint: ["/bin/sh", "/debezium/register-connector.sh"]
+    environment:
+      CONNECT_URL: http://connect:8083
+    networks: [cqrs-net]

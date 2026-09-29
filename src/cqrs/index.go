@@ -78,6 +78,7 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID any](
 		c.FlushInterval = 5 * time.Second
 	}
 	return &CQRSImpl[TData, TResponse, TRequest, TID]{
+		Channel:              c.Channel,
 		ColumnDefaultID:      c.ColumnDefaultID,
 		ColumnDefaultSort:    c.ColumnDefaultSort,
 		Preloads:             c.Preloads,

@@ -209,10 +209,11 @@ func (f *fakeBroadcastService) waitForCall(t *testing.T, timeout time.Duration) 
 // event for this topic.
 
 type fakeMessageBroker struct {
-	mu      sync.Mutex
-	handler func(key, value []byte) error
-	subDone chan struct{}
-	once    sync.Once
+	mu           sync.Mutex
+	handler      func(key, value []byte) error
+	subDone      chan struct{}
+	once         sync.Once
+	subscribedTo string
 }
 
 func newFakeMessageBroker() *fakeMessageBroker {
@@ -225,13 +226,20 @@ func (f *fakeMessageBroker) Publish(_ context.Context, _ string, _, _ []byte) er
 	return nil
 }
 
-func (f *fakeMessageBroker) Subscribe(ctx context.Context, _ string, handler func(key, value []byte) error) error {
+func (f *fakeMessageBroker) Subscribe(ctx context.Context, topic string, handler func(key, value []byte) error) error {
 	f.mu.Lock()
 	f.handler = handler
+	f.subscribedTo = topic
 	f.mu.Unlock()
 	f.once.Do(func() { close(f.subDone) })
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+func (f *fakeMessageBroker) subscribedTopic() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.subscribedTo
 }
 
 // Emit waits for Subscribe to have registered a handler, then delivers a

@@ -1,0 +1,21 @@
+{
+  "name": "cqrs-write-db-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "postgres-write",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "postgres",
+    "database.dbname": "cqrs_write",
+    "topic.prefix": "cqrs",
+    "plugin.name": "pgoutput",
+    "publication.autocreate.mode": "all_tables",
+    "schema.include.list": "public",
+    "slot.name": "cqrs_write_slot",
+    "tombstones.on.delete": "false",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false"
+  }
+}

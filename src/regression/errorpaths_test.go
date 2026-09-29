@@ -12,6 +12,59 @@ import (
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
 )
 
+// TestErrorPaths_NewCQRS_PreservesChannel guards against a regression
+// where NewCQRS defaulted an empty Channel to "default" but then never
+// copied Channel into the returned struct at all — every constructed
+// CQRSImpl silently had Channel == "", which made Run subscribe to an
+// empty Kafka topic (a real Kafka client panics on that; the in-process
+// fake broker used everywhere else in this suite ignores its topic
+// argument, so nothing else here would ever have caught it). Checks both
+// the explicit-Channel and the defaulted-Channel cases, and that Channel
+// actually reaches Subscribe and a broadcast call, not just the struct
+// field.
+func TestErrorPaths_NewCQRS_PreservesChannel(t *testing.T) {
+	t.Run("Explicit Channel", func(t *testing.T) {
+		h := newCDCHarness(t, 1)
+		if h.c.Channel != "widgets" {
+			t.Fatalf("expected Channel 'widgets' on the constructed CQRSImpl, got %q", h.c.Channel)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := h.runInBackground(ctx)
+
+		envelope, err := sonic.Marshal(domains.CQRSQueuePayload[widget]{
+			EventID: "evt-1", ChangeType: domains.ChangeTypeCreated, Payload: widget{ID: "w1", Name: "n"},
+		})
+		if err != nil {
+			t.Fatalf("marshalling: %v", err)
+		}
+		h.broker.Emit(t, []byte("w1"), envelope)
+		h.broadcast.waitForCall(t, 2*time.Second)
+
+		if got := h.broker.subscribedTopic(); got != "widgets" {
+			t.Errorf("expected Run to Subscribe to topic 'widgets', got %q", got)
+		}
+		calls := h.broadcast.snapshot()
+		if len(calls) != 1 || len(calls[0].channels) != 1 || calls[0].channels[0] != "widgets" {
+			t.Errorf("expected a broadcast on channel 'widgets', got %+v", calls)
+		}
+
+		cancel()
+		h.waitForRunToStop(t, done, 2*time.Second)
+	})
+
+	t.Run("Defaulted Channel", func(t *testing.T) {
+		write := newFakeSQLService(t)
+		c := cqrs.NewCQRS(cqrs.CQRSImpl[widget, widgetResource, any, string]{
+			WriteSQLService: write,
+		})
+		if c.Channel != "default" {
+			t.Fatalf(`expected Channel to default to "default", got %q`, c.Channel)
+		}
+	})
+}
+
 func TestErrorPaths_NewCQRS_PanicsWithoutWriteSQLService(t *testing.T) {
 	defer func() {
 		r := recover()
