@@ -2,6 +2,7 @@ package pagination
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -77,6 +78,44 @@ func (c *PaginationService[TData, TID]) applyFilters(
 // against a real ParadeDB-enabled Postgres instance before writing this).
 func applyFilterTerm(q *bun.SelectQuery, f domains.Filter, columnDefaultID string) (*bun.SelectQuery, error) {
 	col := bun.Ident(f.Field)
+	// A nil Value here isn't "absent" the way an empty string or an empty
+	// []any list is — those are real, meaningful values that produce a
+	// well-defined (if sometimes surprising) comparison. nil is different:
+	// confirmed directly that Equal/GT/etc. with a nil Value silently
+	// compile to a comparison that can never be true in SQL ("col = NULL"
+	// is NULL, never TRUE, even for a genuinely NULL column — the caller
+	// almost certainly wanted ModeIsEmpty/ModeIsNotEmpty instead), and
+	// Contains/StartsWith/etc. would silently search for the literal
+	// three-character string "<nil>" (fmt.Sprint(nil)). Modes that don't
+	// need a comparison value at all (IsEmpty/IsNotEmpty) are deliberately
+	// excluded from this check — they ignore Value entirely by design.
+	switch f.Mode {
+	case domains.ModeEqual, domains.ModeNotEqual, domains.ModeGT, domains.ModeGTE,
+		domains.ModeLT, domains.ModeLTE, domains.ModeBefore, domains.ModeAfter,
+		domains.ModeContains, domains.ModeNotContains, domains.ModeStartsWith, domains.ModeEndsWith,
+		domains.ModeSearch, domains.ModeRange:
+		if f.Value == nil {
+			return nil, fmt.Errorf(
+				"mode %q requires a non-nil value (use ModeIsEmpty/ModeIsNotEmpty to match null/empty values instead)",
+				f.Mode,
+			)
+		}
+	case domains.ModeInside, domains.ModeOutside:
+		// bun.In on a nil or non-slice Value doesn't error cleanly — it
+		// was confirmed directly to emit broken SQL that surfaces as a
+		// raw, confusing driver-level syntax error (SQLite: "unrecognized
+		// token"; Postgres: "syntax error at or near..."), not a usable
+		// Go error a caller could act on. An empty, non-nil list ([]any{})
+		// is fine as-is (confirmed: matches zero rows cleanly on both
+		// dialects) — only nil or a genuinely non-list value is rejected
+		// here.
+		if f.Value == nil {
+			return nil, fmt.Errorf("mode %q requires a non-nil list value", f.Mode)
+		}
+		if k := reflect.ValueOf(f.Value).Kind(); k != reflect.Slice && k != reflect.Array {
+			return nil, fmt.Errorf("mode %q requires a list value, got %T", f.Mode, f.Value)
+		}
+	}
 	switch f.Mode {
 	case domains.ModeEqual, domains.ModeNotEqual, domains.ModeGT, domains.ModeGTE,
 		domains.ModeLT, domains.ModeLTE, domains.ModeBefore, domains.ModeAfter,
@@ -217,6 +256,21 @@ func escapeLike(s string) string {
 // rather than domains.RangeNumber/RangeDate — both shapes are accepted here
 // since a caller building a StructuredFilter directly in Go may use the
 // typed struct instead.
+//
+// The map[string]any form's "from"/"to" keys being present isn't enough on
+// its own — {"from": null, "to": 100} is valid JSON a client can easily
+// send, and confirmed directly that letting a nil bound through silently
+// compiles to "col BETWEEN NULL AND 100", which (per SQL's normal
+// comparison-with-NULL rules) matches nothing at all, even rows that would
+// obviously satisfy "up to 100" if null had been treated as "no lower
+// bound." Rejecting it here with a clear error is safer than guessing
+// which open-ended interpretation the caller meant.
+//
+// domains.RangeNumber{}/RangeDate{} arriving as an untouched Go zero value
+// (both bounds unset) is a related but different problem this function
+// can't fix: {0, 0} is indistinguishable from "the caller really does want
+// exactly zero" once it's a plain float64/time.Time rather than a pointer —
+// see RangeNumber/RangeDate's own doc comments.
 func extractRangeBounds(value any) (from, to any, err error) {
 	switch v := value.(type) {
 	case domains.RangeNumber:
@@ -228,6 +282,9 @@ func extractRangeBounds(value any) (from, to any, err error) {
 		to, okTo := v["to"]
 		if !okFrom || !okTo {
 			return nil, nil, fmt.Errorf("range value missing \"from\"/\"to\": %#v", value)
+		}
+		if from == nil || to == nil {
+			return nil, nil, fmt.Errorf("range value's \"from\"/\"to\" must not be null: %#v", value)
 		}
 		return from, to, nil
 	default:

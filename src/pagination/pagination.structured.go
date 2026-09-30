@@ -77,11 +77,11 @@ func (c *PaginationService[TData, TID]) checkReady() error {
 
 // paginate is Pagination's core, running against an explicit db rather than
 // always going through c.ReadSQLService.Client() — this is what lets
-// FilterWithTx run the exact same logic against a caller-supplied
-// *bun.Tx (e.g. reading back rows written earlier in the same transaction,
-// before it commits) instead of a separate connection that wouldn't see
-// them yet.
-// paginate combines two independent StructuredFilters with AND: extraFilter
+// FilterWithTx run the exact same logic against a caller-supplied *bun.Tx
+// (e.g. reading back rows written earlier in the same transaction, before
+// it commits) instead of a separate connection that wouldn't see them yet.
+//
+// It also combines two independent StructuredFilters with AND: extraFilter
 // (backend-hardcoded, e.g. tenant scoping — trusted, so an unknown field in
 // it is a real error, not something to silently drop) and
 // pagination.Filter (frontend-supplied, run through normalizeFilters'
@@ -121,6 +121,13 @@ func (c *PaginationService[TData, TID]) paginate(
 	}
 	backward := hasCursor && payload.Backward
 	op, uniform := cursorIsUniform(sortFields, backward)
+	if uniform && anyNullableSortField[TData](sortFields) {
+		// A nullable sort column has no well-defined row-value comparison
+		// (applyCursorUniform) — see appendCursorTerm's doc comment for the
+		// NULL-aware WHERE shape paginateMixedDirection's per-branch terms
+		// use instead, which is the only path that knows how to handle it.
+		uniform = false
+	}
 	limit := pagination.PageSize + 1
 
 	var data []TData
@@ -153,7 +160,13 @@ func (c *PaginationService[TData, TID]) paginate(
 			if sf.Order == domains.SortOrderAsc {
 				dir = "ASC"
 			}
-			q = q.OrderExpr("? "+dir, bun.Ident(sf.Field))
+			// NULLS LAST regardless of direction: a no-op for a non-nullable
+			// column, but this path is still what a cursor-less first page
+			// uses even when a later sort column is nullable (see
+			// anyNullableSortField), so its row order has to already match
+			// what appendCursorTerm's NULLS-LAST-always convention expects
+			// once a page 2 cursor comes back through the other path.
+			q = q.OrderExpr("? "+dir+" NULLS LAST", bun.Ident(sf.Field))
 		}
 		q = q.Limit(limit)
 		if err := q.Scan(ctx); err != nil {
@@ -166,6 +179,9 @@ func (c *PaginationService[TData, TID]) paginate(
 		data = data[:pagination.PageSize]
 	}
 	if backward {
+		// data came back in reversed (walked-from-the-other-end) order —
+		// flip it back so Data always reads in the same forward order
+		// regardless of which direction fetched it.
 		for i, j := 0, len(data)-1; i < j; i, j = i+1, j-1 {
 			data[i], data[j] = data[j], data[i]
 		}

@@ -2,6 +2,7 @@ package pagination
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/uptrace/bun"
@@ -12,14 +13,18 @@ import (
 
 // cursorPayload is the decoded shape of a domains.Pagination.Cursor token:
 // one string value per active sort column (in the same order as the
-// resolved sort fields, always ending in ColumnDefaultID), plus which
-// direction this specific token means to walk. Baking Backward into the
-// token itself — rather than taking it as a separate request field — means
-// the caller never has to track direction on its own: it just always sends
-// back whichever cursor (NextCursor or PreviousCursor) the previous
-// response gave it, and the token itself says how to use it.
+// resolved sort fields, always ending in ColumnDefaultID), which of those
+// were actually NULL on the boundary row (Values alone can't tell —
+// utils.FieldValueAt already collapses a nil pointer field to "", the same
+// string a real empty value would produce), plus which direction this
+// specific token means to walk. Baking Backward into the token itself —
+// rather than taking it as a separate request field — means the caller
+// never has to track direction on its own: it just always sends back
+// whichever cursor (NextCursor or PreviousCursor) the previous response
+// gave it, and the token itself says how to use it.
 type cursorPayload struct {
 	Values   []string `json:"v"`
+	Null     []bool   `json:"n,omitempty"`
 	Backward bool     `json:"b,omitempty"`
 }
 
@@ -73,17 +78,21 @@ func (c *PaginationService[TData, TID]) defaultSortField() domains.SortField {
 }
 
 // encodeCursor builds the opaque cursor token for resuming a keyset
-// pagination scan starting from data — the sort-key tuple of that row, plus
-// backward stamped into the token so a later call knows how to interpret it
-// without the caller having to also track/send a direction.
+// pagination scan starting from data — the sort-key tuple of that row (plus
+// which entries were actually NULL — see cursorPayload), and backward
+// stamped into the token so a later call knows how to interpret it without
+// the caller having to also track/send a direction.
 func (c *PaginationService[TData, TID]) encodeCursor(
 	data *TData, sortFields []domains.SortField, backward bool,
 ) (string, error) {
 	values := make([]string, len(sortFields))
+	nulls := make([]bool, len(sortFields))
 	for i, sf := range sortFields {
-		values[i] = utils.FieldValueAt(data, utils.BunColumnFieldIndex[TData](sf.Field))
+		idx := utils.BunColumnFieldIndex[TData](sf.Field)
+		values[i] = utils.FieldValueAt(data, idx)
+		nulls[i] = utils.FieldIsNilAt(data, idx)
 	}
-	return utils.EncodeQueryParam(cursorPayload{Values: values, Backward: backward})
+	return utils.EncodeQueryParam(cursorPayload{Values: values, Null: nulls, Backward: backward})
 }
 
 // decodeCursor decodes a cursor token once, shared by both of Pagination's
@@ -106,6 +115,12 @@ func (c *PaginationService[TData, TID]) decodeCursor(
 			"cursor does not match the current sort fields: expected %d values, got %d",
 			len(sortFields), len(payload.Values),
 		)
+	}
+	if len(payload.Null) < len(payload.Values) {
+		// Defensive, not required by any known caller today: pads a
+		// shorter/absent Null slice with false (not-null) rather than
+		// erroring, so a token encoded before Null existed still decodes.
+		payload.Null = append(payload.Null, make([]bool, len(payload.Values)-len(payload.Null))...)
 	}
 	return payload, true, nil
 }
@@ -180,15 +195,71 @@ func applyCursorUniform(
 // Used two ways: cursorIsUniform's fallback for a genuinely mixed-direction
 // sort builds one of these per branch of its UNION ALL (see
 // paginateMixedDirection) — each branch stays independently indexable,
-// which the equivalent single OR'd-together WHERE clause never was.
+// which the equivalent single OR'd-together WHERE clause never was. It's
+// also the only path ever used once any sort column is nullable (see
+// anyNullableSortField) — applyCursorUniform's row-value comparison has no
+// well-defined meaning once a component can be NULL, so a nullable column
+// forces this per-term path even for an otherwise-uniform direction.
+//
+// Every column here sorts NULLS LAST regardless of ASC/DESC (see the
+// NULLS LAST appended to every ORDER BY in paginate/paginateMixedDirection)
+// — a fixed, dialect-independent convention chosen specifically so this
+// function's NULL handling doesn't also have to branch on which way each
+// database defaults NULL ordering (confirmed directly: Postgres defaults
+// ASC to NULLS LAST but SQLite defaults ASC to NULLS FIRST — the opposite —
+// which would otherwise make the correct WHERE shape dialect-dependent
+// too). Two cases per column, on top of the ordinary op comparison:
+//   - values[idx] is NULL: nothing sorts after a NULL in this column since
+//     NULLs are already last, so forward has no match here at all;
+//     backward matches every non-NULL value in the column.
+//   - values[idx] isn't NULL, walking forward: the ordinary "col op v"
+//     match needs "OR col IS NULL" added, since every trailing NULL row
+//     also sorts after any non-NULL boundary value under NULLS LAST.
+//     Walking backward never needs this — NULLs are already the furthest
+//     forward possible, so nothing "before" a non-NULL value is NULL.
 func appendCursorTerm(
-	q *bun.SelectQuery, sortFields []domains.SortField, values []string, idx int, backward bool,
+	q *bun.SelectQuery, sortFields []domains.SortField, values []string, nulls []bool, idx int, backward bool,
 ) *bun.SelectQuery {
 	for i := range idx {
-		q = q.Where("? = ?", bun.Ident(sortFields[i].Field), values[i])
+		field := bun.Ident(sortFields[i].Field)
+		if nulls[i] {
+			q = q.Where("? IS NULL", field)
+		} else {
+			q = q.Where("? = ?", field, values[i])
+		}
+	}
+	field := bun.Ident(sortFields[idx].Field)
+	if nulls[idx] {
+		if backward {
+			return q.Where("? IS NOT NULL", field)
+		}
+		return q.Where("1 = 0")
 	}
 	op := cursorOperator(sortFields[idx].Order, backward)
-	return q.Where(fmt.Sprintf("? %s ?", op), bun.Ident(sortFields[idx].Field), values[idx])
+	if !backward {
+		return q.Where(fmt.Sprintf("(? %s ? OR ? IS NULL)", op), field, values[idx], field)
+	}
+	return q.Where(fmt.Sprintf("? %s ?", op), field, values[idx])
+}
+
+// anyNullableSortField reports whether any resolved sort column's Go field
+// type is a pointer (nullable) — see appendCursorTerm's doc comment for how
+// NULLs are handled once this forces the mixed-direction path, and
+// resolveSortFields' Null-handling for why this can't be answered from the
+// cursor payload alone (a fresh, cursor-less first page has no payload yet,
+// but the query it builds already needs to know whether to expect NULLs).
+func anyNullableSortField[TData any](sortFields []domains.SortField) bool {
+	t := reflect.TypeFor[TData]()
+	for _, sf := range sortFields {
+		idx := utils.BunColumnFieldIndex[TData](sf.Field)
+		if idx < 0 || idx >= t.NumField() {
+			continue
+		}
+		if t.Field(idx).Type.Kind() == reflect.Pointer {
+			return true
+		}
+	}
+	return false
 }
 
 // reverseSortFields flips every column's direction — used to build the

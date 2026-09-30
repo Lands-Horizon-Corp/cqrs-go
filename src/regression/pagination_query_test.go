@@ -184,7 +184,7 @@ func TestPagination_HappyPath_MixedAscDescMultiColumnSortWithTiesAndCursor(t *te
 		t.Error("expected no next page after 3 rows")
 	}
 
-	want := []string{"a", "b", "c"} // priority 9 first, then priority-5 ties broken by name asc
+	want := []string{"a", "b", "c"}
 	for i, id := range want {
 		if gotIDs[i] != id {
 			t.Errorf("position %d: expected %q, got %q (full order: %v)", i, id, gotIDs[i], gotIDs)

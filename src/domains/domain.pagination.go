@@ -44,14 +44,27 @@ const (
 )
 
 type (
-	Mode        string
-	DataType    string
-	Logic       string
-	SortOrder   string
+	Mode      string
+	DataType  string
+	Logic     string
+	SortOrder string
+	// RangeNumber is ModeRange's typed bound pair for a caller building a
+	// StructuredFilter directly in Go (JSON-decoded ranges arrive as
+	// map[string]any{"from":...,"to":...} instead — see
+	// pagination.extractRangeBounds). Both fields are plain float64, not
+	// *float64: there's no way to tell an unset RangeNumber{} (Go's zero
+	// value, From=To=0) apart from a caller who genuinely wants the range
+	// [0, 0] — confirmed directly that an unset RangeNumber{} silently
+	// matches only exactly-zero rows instead of erroring. Always set both
+	// fields explicitly.
 	RangeNumber struct {
 		From float64 `json:"from"`
 		To   float64 `json:"to"`
 	}
+	// RangeDate is RangeNumber's date-typed counterpart, with the same
+	// zero-value caveat: an unset RangeDate{} is From=To=time.Time{} (year
+	// 1, not "unbounded"), not distinguishable from a caller who actually
+	// wants that exact instant. Always set both fields explicitly.
 	RangeDate struct {
 		From time.Time `json:"from"`
 		To   time.Time `json:"to"`

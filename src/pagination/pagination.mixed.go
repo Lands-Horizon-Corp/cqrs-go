@@ -57,7 +57,10 @@ func (c *PaginationService[TData, TID]) paginateMixedDirection(
 			if sf.Order == domains.SortOrderAsc {
 				dir = "ASC"
 			}
-			q = q.OrderExpr("? "+dir, bun.Ident(sf.Field))
+			// NULLS LAST regardless of direction — see appendCursorTerm's
+			// doc comment: its NULL-aware WHERE terms assume this exact
+			// ordering convention, dialect-independently.
+			q = q.OrderExpr("? "+dir+" NULLS LAST", bun.Ident(sf.Field))
 		}
 		return q
 	}
@@ -79,7 +82,7 @@ func (c *PaginationService[TData, TID]) paginateMixedDirection(
 		if err != nil {
 			return fmt.Errorf("applying filters: %w", err)
 		}
-		branch = appendCursorTerm(branch, sortFields, payload.Values, idx, backward)
+		branch = appendCursorTerm(branch, sortFields, payload.Values, payload.Null, idx, backward)
 		branch = applyOrder(branch).Limit(limit)
 
 		name := fmt.Sprintf("cqrs_branch_%d", idx)

@@ -231,12 +231,19 @@ func TestIntegration_SadPath_NewPaginationServicePanicsWhenNeitherReadNorWriteSQ
 	})
 }
 
-// TestPagination_Smoke_EnablePartitioningAgainstRealPostgres is a minimal,
+// TestIntegration_Smoke_EnablePartitioningAgainstRealPostgres is a minimal,
 // single-assertion sanity check that EnablePartitioning + Pagination work
 // together against real Postgres — the deeper scenarios (idempotency,
 // relkind/part_config verification, control-column validation) live in the
 // Happy/Sad Path tests above.
-func TestPagination_Smoke_EnablePartitioningAgainstRealPostgres(t *testing.T) {
+//
+// Named TestIntegration_* like every other test in this package's
+// integration-tagged files, not TestPagination_* — the Makefile's
+// test-integration/test-all targets run `go test -tags=integration ...
+// -run TestIntegration`, so a test named outside that convention silently
+// never runs under `make test-all` at all (confirmed: this one didn't,
+// until renamed).
+func TestIntegration_Smoke_EnablePartitioningAgainstRealPostgres(t *testing.T) {
 	t.Parallel()
 	c, read := newPartitionTestCQRS(t)
 	ctx := context.Background()
