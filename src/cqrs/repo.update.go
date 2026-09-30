@@ -31,7 +31,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateByID(
 	if err == nil && rows == 0 {
 		return nil, sql.ErrNoRows
 	}
-	if err := c.applyPreloads(ctx, c.WriteSQLService.Client(), &data, c.Preload(preload...)); err != nil {
+	if err := c.applyPreloads(ctx, c.WriteSQLService.Client(), &data, preload...); err != nil {
 		return nil, err
 	}
 	if c.ToResource != nil {
@@ -69,9 +69,8 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateMany(
 	if err != nil {
 		return nil, fmt.Errorf("bulk updating records: %w", err)
 	}
-	resolvedPreload := c.Preload(preload...)
 	for i := range data {
-		if err := c.applyPreloads(ctx, c.WriteSQLService.Client(), &data[i], resolvedPreload); err != nil {
+		if err := c.applyPreloads(ctx, c.WriteSQLService.Client(), &data[i], preload...); err != nil {
 			return nil, fmt.Errorf("loading preloads for record at index %d: %w", i, err)
 		}
 	}
@@ -113,9 +112,8 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateManyWithTx(
 	if err != nil {
 		return nil, fmt.Errorf("bulk updating records in tx: %w", err)
 	}
-	resolvedPreload := c.Preload(preload...)
 	for i := range data {
-		if err := c.applyPreloads(ctx, tx, &data[i], resolvedPreload); err != nil {
+		if err := c.applyPreloads(ctx, tx, &data[i], preload...); err != nil {
 			return nil, fmt.Errorf("loading preloads for record at index %d: %w", i, err)
 		}
 	}
@@ -156,7 +154,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateByIDWithTx(
 	if err == nil && rows == 0 {
 		return nil, sql.ErrNoRows
 	}
-	if err := c.applyPreloads(ctx, tx, &data, c.Preload(preload...)); err != nil {
+	if err := c.applyPreloads(ctx, tx, &data, preload...); err != nil {
 		return nil, err
 	}
 	if c.ToResource != nil {

@@ -7,9 +7,12 @@ import (
 	"github.com/uptrace/bun"
 )
 
-func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Preload(
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) applyPreloads(
+	ctx context.Context,
+	db bun.IDB,
+	data *TData,
 	preload ...string,
-) []string {
+) error {
 	if preload == nil {
 		preload = c.Preloads
 	}
@@ -19,15 +22,6 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Preload(
 	if len(preload) == 1 && preload[0] == "" {
 		preload = []string{}
 	}
-	return preload
-}
-
-func (c *CQRSImpl[TData, TResponse, TRequest, TID]) applyPreloads(
-	ctx context.Context,
-	db bun.IDB,
-	data *TData,
-	preload []string,
-) error {
 	if len(preload) == 0 {
 		return nil
 	}

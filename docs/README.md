@@ -424,3 +424,31 @@ not by reasoning about the code:
   restart) — connector crash-recovery, sockudo/broadcast-side failures, and
   network partitions (as opposed to full container restarts) aren't
   exercised.
+
+## PostgreSQL extensions
+
+The local stack (`local/docker-compose`) runs both the write and read
+Postgres instances on `pgvector/pgvector:pg16` — the official Postgres image
+with `pgvector` pre-built in — rather than plain `postgres`, so the
+extension is available without a custom image build.
+
+Two extensions are created automatically on first start, via
+`postgres-write-init/01-extensions.sql` and `postgres-read-init/01-extensions.sql`:
+
+| Extension | Purpose |
+|---|---|
+| `pgcrypto` | Cryptographic functions (e.g. `gen_random_uuid()`) — commonly needed for generating primary keys or other IDs at the DB layer. |
+| `vector` | `pgvector`'s vector type + similarity search operators, for embedding-backed columns/queries on either side of the CQRS split. |
+
+Neither extension is required by `src/cqrs`/`src/utils`/`src/domains`
+themselves — the engine has no opinion on your schema. They're provisioned
+in the local stack because a denormalized read model is a common reason to
+reach for `pgvector` in the first place (e.g. a search-optimized projection
+with an embedding column), so the infrastructure is ready for that without
+extra setup.
+
+Postgres only runs files under `/docker-entrypoint-initdb.d` the *first*
+time a fresh data volume is initialized — editing either `.sql` file after
+the first `docker compose up` won't take effect until you drop the
+corresponding volume and let it reinitialize. See
+`local/docker-compose/README.md` for the full setup.
