@@ -12,6 +12,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateByID(
 	ctx context.Context,
 	id TID,
 	data TData,
+	preload ...string,
 ) (*TResponse, error) {
 	if c.Validator != nil {
 		if err := c.Validator.StructCtx(ctx, &data); err != nil {
@@ -30,6 +31,9 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateByID(
 	if err == nil && rows == 0 {
 		return nil, sql.ErrNoRows
 	}
+	if err := c.applyPreloads(ctx, c.WriteSQLService.Client(), &data, c.Preload(preload...)); err != nil {
+		return nil, err
+	}
 	if c.ToResource != nil {
 		return c.ToResource(&data), nil
 	}
@@ -45,6 +49,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateByID(
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateMany(
 	ctx context.Context,
 	data []TData,
+	preload ...string,
 ) ([]*TResponse, error) {
 	if len(data) == 0 {
 		return []*TResponse{}, nil
@@ -64,6 +69,12 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateMany(
 	if err != nil {
 		return nil, fmt.Errorf("bulk updating records: %w", err)
 	}
+	resolvedPreload := c.Preload(preload...)
+	for i := range data {
+		if err := c.applyPreloads(ctx, c.WriteSQLService.Client(), &data[i], resolvedPreload); err != nil {
+			return nil, fmt.Errorf("loading preloads for record at index %d: %w", i, err)
+		}
+	}
 
 	if c.ToResource == nil {
 		return nil, nil
@@ -82,6 +93,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateManyWithTx(
 	ctx context.Context,
 	tx bun.Tx,
 	data []TData,
+	preload ...string,
 ) ([]*TResponse, error) {
 	if len(data) == 0 {
 		return []*TResponse{}, nil
@@ -101,6 +113,12 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateManyWithTx(
 	if err != nil {
 		return nil, fmt.Errorf("bulk updating records in tx: %w", err)
 	}
+	resolvedPreload := c.Preload(preload...)
+	for i := range data {
+		if err := c.applyPreloads(ctx, tx, &data[i], resolvedPreload); err != nil {
+			return nil, fmt.Errorf("loading preloads for record at index %d: %w", i, err)
+		}
+	}
 
 	if c.ToResource == nil {
 		return nil, nil
@@ -119,6 +137,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateByIDWithTx(
 	tx bun.Tx,
 	id TID,
 	data TData,
+	preload ...string,
 ) (*TResponse, error) {
 	if c.Validator != nil {
 		if err := c.Validator.StructCtx(ctx, &data); err != nil {
@@ -136,6 +155,9 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateByIDWithTx(
 	rows, err := res.RowsAffected()
 	if err == nil && rows == 0 {
 		return nil, sql.ErrNoRows
+	}
+	if err := c.applyPreloads(ctx, tx, &data, c.Preload(preload...)); err != nil {
+		return nil, err
 	}
 	if c.ToResource != nil {
 		return c.ToResource(&data), nil

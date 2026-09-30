@@ -10,6 +10,7 @@ import (
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Create(
 	ctx context.Context,
 	data TData,
+	preload ...string,
 ) (*TResponse, error) {
 	if c.Validator != nil {
 		if err := c.Validator.StructCtx(ctx, &data); err != nil {
@@ -24,6 +25,9 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Create(
 	if err != nil {
 		return nil, fmt.Errorf("inserting record: %w", err)
 	}
+	if err := c.applyPreloads(ctx, c.WriteSQLService.Client(), &data, c.Preload(preload...)); err != nil {
+		return nil, err
+	}
 
 	if c.ToResource != nil {
 		return c.ToResource(&data), nil
@@ -34,6 +38,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Create(
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) CreateMany(
 	ctx context.Context,
 	data []TData,
+	preload ...string,
 ) ([]*TResponse, error) {
 	if len(data) == 0 {
 		return []*TResponse{}, nil
@@ -46,7 +51,6 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) CreateMany(
 			}
 		}
 	}
-
 	_, err := c.WriteSQLService.Client().NewInsert().
 		Model(&data).
 		Returning("*").
@@ -54,11 +58,16 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) CreateMany(
 	if err != nil {
 		return nil, fmt.Errorf("bulk inserting records: %w", err)
 	}
+	resolvedPreload := c.Preload(preload...)
+	for i := range data {
+		if err := c.applyPreloads(ctx, c.WriteSQLService.Client(), &data[i], resolvedPreload); err != nil {
+			return nil, fmt.Errorf("loading preloads for record at index %d: %w", i, err)
+		}
+	}
 
 	if c.ToResource == nil {
 		return nil, nil
 	}
-
 	responses := make([]*TResponse, 0, len(data))
 	for i := range data {
 		if res := c.ToResource(&data[i]); res != nil {
@@ -72,19 +81,22 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) CreateWithTx(
 	ctx context.Context,
 	tx bun.Tx,
 	data TData,
+	preload ...string,
 ) (*TResponse, error) {
 	if c.Validator != nil {
 		if err := c.Validator.StructCtx(ctx, &data); err != nil {
 			return nil, fmt.Errorf("validating request payload: %w", err)
 		}
 	}
-
 	_, err := tx.NewInsert().
 		Model(&data).
 		Returning("*").
 		Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("inserting record: %w", err)
+	}
+	if err := c.applyPreloads(ctx, tx, &data, c.Preload(preload...)); err != nil {
+		return nil, err
 	}
 	if c.ToResource != nil {
 		return c.ToResource(&data), nil
@@ -96,6 +108,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) CreateManyWithTx(
 	ctx context.Context,
 	tx bun.Tx,
 	data []TData,
+	preload ...string,
 ) ([]*TResponse, error) {
 	if len(data) == 0 {
 		return []*TResponse{}, nil
@@ -113,6 +126,12 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) CreateManyWithTx(
 		Exec(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("bulk inserting records in tx: %w", err)
+	}
+	resolvedPreload := c.Preload(preload...)
+	for i := range data {
+		if err := c.applyPreloads(ctx, tx, &data[i], resolvedPreload); err != nil {
+			return nil, fmt.Errorf("loading preloads for record at index %d: %w", i, err)
+		}
 	}
 	if c.ToResource == nil {
 		return nil, nil
