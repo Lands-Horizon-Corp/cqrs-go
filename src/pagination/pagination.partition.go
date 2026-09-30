@@ -1,4 +1,4 @@
-package cqrs
+package pagination
 
 import (
 	"context"
@@ -46,15 +46,14 @@ import (
 // id values still need to be globally unique in practice (e.g. a UUID/ULID
 // generator), since the database no longer enforces that alone.
 //
-// Note: a table CQRSImpl.Run() actively CDC-syncs into can't cleanly use
-// this today either — Run()'s bulk upsert hardcodes
+// Note: a table that's actively CDC-synced by something like cqrs.CQRSImpl's
+// Run() can't cleanly use this today either — that upsert path hardcodes
 // "ON CONFLICT (ColumnDefaultID) DO UPDATE", which needs a matching
 // single-column unique constraint that a partitioned table with a
 // composite PK won't have. EnablePartitioning is intended for read-side
 // tables populated some other way (a reporting/analytics projection, a
-// batch job, ...), not ones Run() also writes into, unless/until Run()'s
-// conflict target becomes configurable.
-func (c *CQRSImpl[TData, TResponse, TRequest, TID]) EnablePartitioning(
+// batch job, ...), not ones a CDC sync also writes into.
+func (c *PaginationService[TData, TResponse, TRequest, TID]) EnablePartitioning(
 	ctx context.Context, control string, interval string,
 ) error {
 	if c.ReadSQLService == nil {
@@ -133,7 +132,6 @@ func bunFieldIsPK[T any](column string) bool {
 		return false
 	}
 	for field := range t.Fields() {
-		field := field
 		if !field.IsExported() {
 			continue
 		}

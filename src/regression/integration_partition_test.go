@@ -9,8 +9,8 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/Lands-Horizon-Corp/cqrs-go/src/cqrs"
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
+	"github.com/Lands-Horizon-Corp/cqrs-go/src/pagination"
 )
 
 // EnablePartitioning is real DDL against real Postgres (CREATE TABLE ...
@@ -49,16 +49,22 @@ func partitionedLedgerEntryToResource(e *partitionedLedgerEntry) *partitionedLed
 	return &partitionedLedgerEntryResource{ID: e.ID, CreatedAt: e.CreatedAt, Amount: e.Amount}
 }
 
-func newPartitionTestCQRS(t *testing.T) (*cqrs.CQRSImpl[partitionedLedgerEntry, partitionedLedgerEntryResource, any, string], *fakeSQLService) {
+func newPartitionTestCQRS(t *testing.T) (*pagination.PaginationService[partitionedLedgerEntry, partitionedLedgerEntryResource, any, string], *fakeSQLService) {
 	t.Helper()
 	skipUnlessInfraReachable(t)
 	read := newPostgresSQLService(t, itReadDSN)
-	c := cqrs.NewCQRS(cqrs.CQRSImpl[partitionedLedgerEntry, partitionedLedgerEntryResource, any, string]{
-		WriteSQLService: read,
-		ReadSQLService:  read,
-		ToResource:      partitionedLedgerEntryToResource,
+	p := pagination.NewPaginationService(pagination.PaginationService[partitionedLedgerEntry, partitionedLedgerEntryResource, any, string]{
+		ReadSQLService: read,
+		ToResource:     partitionedLedgerEntryToResource,
+		// NewPaginationService's own default ("updated_at DESC") doesn't
+		// apply here — partitionedLedgerEntry has no updated_at column,
+		// only id/created_at/amount (confirmed directly: a call relying on
+		// the unconfigured default hit a real Postgres "column does not
+		// exist" error). Configuring the right default per entity is
+		// exactly what ColumnDefaultSort is for.
+		ColumnDefaultSort: "created_at desc",
 	})
-	return c, read
+	return p, read
 }
 
 // qualifiedLedgerTable resolves "<current_schema>.partitioned_ledger_entries"
@@ -174,14 +180,43 @@ func TestIntegration_SadPath_EnablePartitioningNonPKControlColumnReturnsError(t 
 	}
 }
 
-func TestIntegration_SadPath_EnablePartitioningNilReadSQLServiceReturnsError(t *testing.T) {
+func TestIntegration_SadPath_NewPaginationServicePanicsWhenReadSQLServiceIsNil(t *testing.T) {
 	t.Parallel()
-	skipUnlessInfraReachable(t)
-	c := cqrs.NewCQRS(cqrs.CQRSImpl[partitionedLedgerEntry, partitionedLedgerEntryResource, any, string]{
-		WriteSQLService: newPostgresSQLService(t, itReadDSN),
-		ToResource:      partitionedLedgerEntryToResource,
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected NewPaginationService to panic when ReadSQLService is nil, got no panic")
+		}
+	}()
+	pagination.NewPaginationService(pagination.PaginationService[partitionedLedgerEntry, partitionedLedgerEntryResource, any, string]{
+		ToResource: partitionedLedgerEntryToResource,
+		// ReadSQLService deliberately left nil.
 	})
-	if err := c.EnablePartitioning(context.Background(), "created_at", "1 day"); err == nil {
-		t.Fatal("expected an error when ReadSQLService is nil, got nil")
+}
+
+// TestPagination_Smoke_EnablePartitioningAgainstRealPostgres is a minimal,
+// single-assertion sanity check that EnablePartitioning + Pagination work
+// together against real Postgres — the deeper scenarios (idempotency,
+// relkind/part_config verification, control-column validation) live in the
+// Happy/Sad Path tests above.
+func TestPagination_Smoke_EnablePartitioningAgainstRealPostgres(t *testing.T) {
+	t.Parallel()
+	c, read := newPartitionTestCQRS(t)
+	ctx := context.Background()
+
+	if err := c.EnablePartitioning(ctx, "created_at", "1 day"); err != nil {
+		t.Fatalf("EnablePartitioning returned error: %v", err)
+	}
+	cleanupPartmanRegistration(t, read, qualifiedLedgerTable(t, ctx, read))
+
+	entry := partitionedLedgerEntry{ID: "smoke", CreatedAt: time.Now()}
+	if _, err := read.Client().NewInsert().Model(&entry).Exec(ctx); err != nil {
+		t.Fatalf("inserting into partitioned table: %v", err)
+	}
+	result, err := c.Pagination(ctx, domains.Pagination{})
+	if err != nil {
+		t.Fatalf("Pagination returned error: %v", err)
+	}
+	if len(result.Data) != 1 {
+		t.Fatalf("expected 1 row back, got %d", len(result.Data))
 	}
 }

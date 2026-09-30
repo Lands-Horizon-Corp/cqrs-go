@@ -8,7 +8,7 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-type CQRSImpl[TData any, TResponse any, TRequest any, TID any] struct {
+type CQRSImpl[TData any, TResponse any, TRequest any, TID comparable] struct {
 	// Default column names for ID and sorting
 	Channel           domains.Channel
 	ColumnDefaultID   string
@@ -53,7 +53,7 @@ type CQRSImpl[TData any, TResponse any, TRequest any, TID any] struct {
 	idFieldIndex int
 }
 
-func NewCQRS[TData any, TResponse any, TRequest any, TID any](
+func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 	c CQRSImpl[TData, TResponse, TRequest, TID],
 ) *CQRSImpl[TData, TResponse, TRequest, TID] {
 	if c.ColumnDefaultID == "" {

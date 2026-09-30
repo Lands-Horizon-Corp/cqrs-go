@@ -3,33 +3,42 @@ package regression
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
-	"github.com/Lands-Horizon-Corp/cqrs-go/src/cqrs"
+	"github.com/uptrace/bun"
+
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
+	"github.com/Lands-Horizon-Corp/cqrs-go/src/pagination"
 )
 
-// This file verifies CQRSImpl.Pagination — cursor (keyset) pagination
-// against ReadSQLService only. Unlike the write-path tests elsewhere in
-// this suite, seeding here goes straight through bun (db.NewInsert()),
-// bypassing Create/CDC entirely: Pagination only ever reads, so there's
-// nothing write-path-specific to exercise.
+// This file verifies pagination.PaginationService.Pagination — cursor
+// (keyset) pagination against ReadSQLService only. Unlike the write-path
+// tests elsewhere in this suite, seeding here goes straight through bun
+// (db.NewInsert()), bypassing Create/CDC entirely: Pagination only ever
+// reads, so there's nothing write-path-specific to exercise.
 
-// newPaginationQueryTestCQRS points both ReadSQLService and WriteSQLService
-// at the same in-memory SQLite db (there's only one real database in this
-// unit test; the point being verified is that Pagination *only* issues
-// reads against ReadSQLService, not that a second physical database exists)
+// newPaginationQueryTestCQRS points ReadSQLService at an in-memory SQLite db
 // using the same fakeSQLService/widget fixture as the rest of this suite.
-func newPaginationQueryTestCQRS(t *testing.T) (*cqrs.CQRSImpl[widget, widgetResource, any, string], *fakeSQLService) {
+func newPaginationQueryTestCQRS(t *testing.T) (*pagination.PaginationService[widget, widgetResource, any, string], *fakeSQLService) {
 	t.Helper()
 	read := newFakeSQLService(t)
-	c := cqrs.NewCQRS(cqrs.CQRSImpl[widget, widgetResource, any, string]{
-		WriteSQLService: read,
-		ReadSQLService:  read,
-		ToResource:      widgetToResource,
+	p := pagination.NewPaginationService(pagination.PaginationService[widget, widgetResource, any, string]{
+		ReadSQLService: read,
+		ToResource:     widgetToResource,
 	})
-	return c, read
+	return p, read
+}
+
+// newPaginationPreloadService builds a PaginationService over the same
+// preloadPost/preloadAuthor fixture pair preload_test.go uses for the
+// write-path preload tests, sharing db so both sides see the same data.
+func newPaginationPreloadService(db *bun.DB) *pagination.PaginationService[preloadPost, preloadPostResource, any, string] {
+	return pagination.NewPaginationService(pagination.PaginationService[preloadPost, preloadPostResource, any, string]{
+		ReadSQLService: &fakeSQLService{db: db},
+		ToResource:     preloadPostToResource,
+	})
 }
 
 func seedWidgets(t *testing.T, read *fakeSQLService, widgets ...widget) {
@@ -54,7 +63,7 @@ func TestPagination_HappyPath_CursorPagesThroughAllRowsWithoutOverlapOrGaps(t *t
 	}
 	seedWidgets(t, read, widgets...)
 
-	pagination := domains.Pagination{
+	p := domains.Pagination{
 		Filter:   domains.StructuredFilter{SortFields: []domains.SortField{{Field: "id", Order: domains.SortOrderAsc}}},
 		PageSize: 10,
 	}
@@ -62,7 +71,7 @@ func TestPagination_HappyPath_CursorPagesThroughAllRowsWithoutOverlapOrGaps(t *t
 	seen := map[string]bool{}
 	pages := 0
 	for {
-		result, err := c.Pagination(ctx, pagination)
+		result, err := c.Pagination(ctx, p)
 		if err != nil {
 			t.Fatalf("Pagination returned error: %v", err)
 		}
@@ -82,7 +91,7 @@ func TestPagination_HappyPath_CursorPagesThroughAllRowsWithoutOverlapOrGaps(t *t
 			}
 			break
 		}
-		pagination.Cursor = result.NextCursor
+		p.Cursor = result.NextCursor
 	}
 
 	if len(seen) != total {
@@ -197,10 +206,9 @@ func TestPagination_HappyPath_PreloadIntegration(t *testing.T) {
 		t.Fatalf("seed CreateMany returned error: %v", err)
 	}
 
-	pc := cqrs.NewCQRS(cqrs.CQRSImpl[preloadPost, preloadPostResource, any, string]{
-		WriteSQLService: &fakeSQLService{db: db},
-		ReadSQLService:  &fakeSQLService{db: db},
-		ToResource:      preloadPostToResource,
+	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, preloadPostResource, any, string]{
+		ReadSQLService: &fakeSQLService{db: db},
+		ToResource:     preloadPostToResource,
 	})
 
 	result, err := pc.Pagination(ctx, domains.Pagination{
@@ -237,17 +245,17 @@ func TestPagination_SadPath_UnknownFilterFieldReturnsError(t *testing.T) {
 	}
 }
 
-func TestPagination_SadPath_NilReadSQLServiceReturnsErrorNotPanic(t *testing.T) {
+func TestPagination_SadPath_NewPaginationServicePanicsWhenReadSQLServiceIsNil(t *testing.T) {
 	t.Parallel()
-	c := cqrs.NewCQRS(cqrs.CQRSImpl[widget, widgetResource, any, string]{
-		WriteSQLService: newFakeSQLService(t),
-		ToResource:      widgetToResource,
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected NewPaginationService to panic when ReadSQLService is nil, got no panic")
+		}
+	}()
+	pagination.NewPaginationService(pagination.PaginationService[widget, widgetResource, any, string]{
+		ToResource: widgetToResource,
 		// ReadSQLService deliberately left nil.
 	})
-	_, err := c.Pagination(context.Background(), domains.Pagination{})
-	if err == nil {
-		t.Fatal("expected an error when ReadSQLService is nil, got nil")
-	}
 }
 
 func TestPagination_PoisonPill_UnsupportedFilterModeReturnsError(t *testing.T) {
@@ -274,9 +282,6 @@ func TestPagination_PoisonPill_MalformedCursorReturnsError(t *testing.T) {
 		t.Fatal("expected an error for a malformed cursor, got nil")
 	}
 }
-
-//go:fix inline
-func strPtr(s string) *string { return new(s) }
 
 // TestPagination_HappyPath_RemainingFilterModes covers every Mode not
 // already exercised by TestPagination_HappyPath_FilterModesEqualGTContainsRange:
@@ -401,9 +406,6 @@ func TestPagination_SadPath_LaterFilterFieldStillValidatedAfterAnEarlierError(t 
 	t.Parallel()
 	c, read := newPaginationQueryTestCQRS(t)
 	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha", Priority: new(1)})
-
-	// Three filters so the loop's "stop processing once an error is set"
-	// branch (skipping the third once the second fails) actually executes.
 	_, err := c.Pagination(context.Background(), domains.Pagination{
 		Filter: domains.StructuredFilter{Filters: []domains.Filter{
 			{Field: "name", Mode: domains.ModeEqual, Value: "Alpha"},
@@ -423,7 +425,6 @@ func TestPagination_PoisonPill_InvalidExplicitSortOrderNormalizesToAscending(t *
 		widget{ID: "w1", Name: "Alpha", Priority: new(1)},
 		widget{ID: "w2", Name: "Beta", Priority: new(2)},
 	)
-
 	result, err := c.Pagination(context.Background(), domains.Pagination{
 		Filter: domains.StructuredFilter{SortFields: []domains.SortField{{Field: "priority", Order: "sideways"}}},
 	})
@@ -438,8 +439,7 @@ func TestPagination_PoisonPill_InvalidExplicitSortOrderNormalizesToAscending(t *
 func TestPagination_HappyPath_ColumnDefaultSortAscendingIsUsedWhenNoSortFieldsGiven(t *testing.T) {
 	t.Parallel()
 	read := newFakeSQLService(t)
-	c := cqrs.NewCQRS(cqrs.CQRSImpl[widget, widgetResource, any, string]{
-		WriteSQLService:   read,
+	c := pagination.NewPaginationService(pagination.PaginationService[widget, widgetResource, any, string]{
 		ReadSQLService:    read,
 		ToResource:        widgetToResource,
 		ColumnDefaultSort: "priority asc",
@@ -448,7 +448,6 @@ func TestPagination_HappyPath_ColumnDefaultSortAscendingIsUsedWhenNoSortFieldsGi
 		widget{ID: "w1", Name: "Alpha", Priority: new(2)},
 		widget{ID: "w2", Name: "Beta", Priority: new(1)},
 	)
-
 	result, err := c.Pagination(context.Background(), domains.Pagination{})
 	if err != nil {
 		t.Fatalf("Pagination returned error: %v", err)
@@ -501,10 +500,9 @@ func TestPagination_SadPath_UnknownPreloadRelationReturnsError(t *testing.T) {
 		t.Fatalf("seed CreateMany returned error: %v", err)
 	}
 
-	pc := cqrs.NewCQRS(cqrs.CQRSImpl[preloadPost, preloadPostResource, any, string]{
-		WriteSQLService: &fakeSQLService{db: db},
-		ReadSQLService:  &fakeSQLService{db: db},
-		ToResource:      preloadPostToResource,
+	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, preloadPostResource, any, string]{
+		ReadSQLService: &fakeSQLService{db: db},
+		ToResource:     preloadPostToResource,
 	})
 
 	_, err := pc.Pagination(ctx, domains.Pagination{}, "NotARealRelation")
@@ -700,5 +698,500 @@ func TestPagination_HappyPath_BackwardDirectionWithDescendingSort(t *testing.T) 
 	}
 	if len(back.Data) != 2 || back.Data[0].ID != "a" || back.Data[1].ID != "b" {
 		t.Fatalf("expected backward navigation to reproduce page1's rows [a b], got %+v", back.Data)
+	}
+}
+
+// TestPagination_HappyPath_BackwardDirectionWithMixedDirectionSort exercises
+// paginateMixedDirection's own backward branch (reverseSortFields applied
+// to each UNION ALL branch's ordering) — the other backward tests only use
+// a single-column (therefore always-uniform) sort, so they never touch the
+// mixed-direction code path at all, only the row-value-comparison one.
+func TestPagination_HappyPath_BackwardDirectionWithMixedDirectionSort(t *testing.T) {
+	t.Parallel()
+	c, read := newPaginationQueryTestCQRS(t)
+	ctx := context.Background()
+	// Ties on priority=5 (b, c) force the tiebreaker (name ASC) to matter,
+	// same as the forward-direction mixed-sort test.
+	seedWidgets(t, read,
+		widget{ID: "b", Name: "Bravo", Priority: new(5)},
+		widget{ID: "c", Name: "Charlie", Priority: new(5)},
+		widget{ID: "a", Name: "Alpha", Priority: new(9)},
+	)
+	sortFields := []domains.SortField{
+		{Field: "priority", Order: domains.SortOrderDesc},
+		{Field: "name", Order: domains.SortOrderAsc},
+	}
+
+	page1, err := c.Pagination(ctx, domains.Pagination{Filter: domains.StructuredFilter{SortFields: sortFields}, PageSize: 1})
+	if err != nil {
+		t.Fatalf("page1 error: %v", err)
+	}
+	page2, err := c.Pagination(ctx, domains.Pagination{
+		Filter: domains.StructuredFilter{SortFields: sortFields}, PageSize: 1, Cursor: page1.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("page2 error: %v", err)
+	}
+	if page2.Data[0].ID != "b" {
+		t.Fatalf("expected page2 to be [b], got %+v", page2.Data)
+	}
+
+	back, err := c.Pagination(ctx, domains.Pagination{
+		Filter: domains.StructuredFilter{SortFields: sortFields}, PageSize: 1, Cursor: page2.PreviousCursor,
+	})
+	if err != nil {
+		t.Fatalf("backward error: %v", err)
+	}
+	if len(back.Data) != 1 || back.Data[0].ID != "a" {
+		t.Fatalf("expected backward navigation to reproduce page1's row [a], got %+v", back.Data)
+	}
+}
+
+func TestPagination_SadPath_UnknownFilterFieldWithMixedDirectionSortReturnsError(t *testing.T) {
+	t.Parallel()
+	c, read := newPaginationQueryTestCQRS(t)
+	ctx := context.Background()
+	seedWidgets(t, read,
+		widget{ID: "a", Name: "Alpha", Priority: new(1)},
+		widget{ID: "b", Name: "Beta", Priority: new(2)},
+	)
+	sortFields := []domains.SortField{
+		{Field: "priority", Order: domains.SortOrderDesc},
+		{Field: "name", Order: domains.SortOrderAsc},
+	}
+	page1, err := c.Pagination(ctx, domains.Pagination{Filter: domains.StructuredFilter{SortFields: sortFields}, PageSize: 1})
+	if err != nil {
+		t.Fatalf("page1 error: %v", err)
+	}
+
+	_, err = c.Pagination(ctx, domains.Pagination{
+		Filter: domains.StructuredFilter{
+			SortFields: sortFields,
+			Filters:    []domains.Filter{{Field: "not_a_real_column", Mode: domains.ModeEqual, Value: "x"}},
+		},
+		PageSize: 1,
+		Cursor:   page1.NextCursor,
+	})
+	if err == nil {
+		t.Fatal("expected an error for an unknown filter field on the mixed-direction path, got nil")
+	}
+}
+
+// ============================================================================
+// Happy Path: full round trip + complex filter search
+// ============================================================================
+
+// TestPagination_HappyPath_FullForwardWalkThenFullBackwardWalkReturnsToStart
+// walks every page from the first to the last (NextCursor goes nil), then
+// walks backward from the last page all the way back to the first
+// (PreviousCursor goes nil), asserting every backward page reproduces its
+// corresponding forward page exactly.
+func TestPagination_HappyPath_FullForwardWalkThenFullBackwardWalkReturnsToStart(t *testing.T) {
+	t.Parallel()
+	c, read := newPaginationQueryTestCQRS(t)
+	ctx := context.Background()
+
+	const total = 12
+	const pageSize = 3
+	widgets := make([]widget, total)
+	for i := range widgets {
+		widgets[i] = widget{ID: fmt.Sprintf("w%02d", i), Name: fmt.Sprintf("Widget %02d", i)}
+	}
+	seedWidgets(t, read, widgets...)
+	sortFields := []domains.SortField{{Field: "id", Order: domains.SortOrderAsc}}
+
+	// Forward walk: collect every page's rows and the cursor used to reach it.
+	var forwardPages [][]string
+	var forwardCursors []*string // forwardCursors[i] is the cursor that produced forwardPages[i]
+	var cursor *string
+	for {
+		result, err := c.Pagination(ctx, domains.Pagination{
+			Filter: domains.StructuredFilter{SortFields: sortFields}, PageSize: pageSize, Cursor: cursor,
+		})
+		if err != nil {
+			t.Fatalf("forward page %d: Pagination returned error: %v", len(forwardPages), err)
+		}
+		ids := make([]string, len(result.Data))
+		for i, r := range result.Data {
+			ids[i] = r.ID
+		}
+		forwardPages = append(forwardPages, ids)
+		forwardCursors = append(forwardCursors, cursor)
+		if result.NextCursor == nil {
+			break
+		}
+		cursor = result.NextCursor
+		if len(forwardPages) > total { // safety net
+			t.Fatalf("forward walk exceeded %d pages without terminating", total)
+		}
+	}
+	if len(forwardPages) != total/pageSize {
+		t.Fatalf("expected %d forward pages, got %d: %v", total/pageSize, len(forwardPages), forwardPages)
+	}
+
+	// Backward walk: starting from the last page, ask for PreviousCursor
+	// repeatedly until it's nil, and confirm each step reproduces the
+	// matching forward page in reverse order.
+	lastPage, err := c.Pagination(ctx, domains.Pagination{
+		Filter: domains.StructuredFilter{SortFields: sortFields}, PageSize: pageSize, Cursor: forwardCursors[len(forwardCursors)-1],
+	})
+	if err != nil {
+		t.Fatalf("re-fetching last page: %v", err)
+	}
+	backCursor := lastPage.PreviousCursor
+	for i := len(forwardPages) - 2; i >= 0; i-- {
+		if backCursor == nil {
+			t.Fatalf("backward walk terminated early at forward-page index %d", i)
+		}
+		result, err := c.Pagination(ctx, domains.Pagination{
+			Filter: domains.StructuredFilter{SortFields: sortFields}, PageSize: pageSize, Cursor: backCursor,
+		})
+		if err != nil {
+			t.Fatalf("backward page (reconstructing forward page %d): %v", i, err)
+		}
+		gotIDs := make([]string, len(result.Data))
+		for j, r := range result.Data {
+			gotIDs[j] = r.ID
+		}
+		if fmt.Sprint(gotIDs) != fmt.Sprint(forwardPages[i]) {
+			t.Fatalf("backward reconstruction of forward page %d: expected %v, got %v", i, forwardPages[i], gotIDs)
+		}
+		backCursor = result.PreviousCursor
+	}
+	if backCursor != nil {
+		t.Errorf("expected a nil PreviousCursor once the backward walk reaches the first page, got %v", *backCursor)
+	}
+}
+
+// TestPagination_HappyPath_ComplexFilterSearchAndLogicAcrossPagesWithCursor
+// is the "complex filter search" case: multiple filter modes combined with
+// LogicAnd, a two-column sort, and preload-equivalent data, walked across
+// more than one page via cursor.
+func TestPagination_HappyPath_ComplexFilterSearchAndLogicAcrossPagesWithCursor(t *testing.T) {
+	t.Parallel()
+	c, read := newPaginationQueryTestCQRS(t)
+	ctx := context.Background()
+	// Widgets priced (Priority) 10..29; only even IDs get "Gadget" in the
+	// name. Filter: priority in [12,26] (range) AND name contains "Gadget"
+	// AND priority > 12 (gt) -- narrows to evens in (12, 26]: 14,16,...,26.
+	for i := range 20 {
+		p := 10 + i
+		name := fmt.Sprintf("Item %02d", p)
+		if p%2 == 0 {
+			name = fmt.Sprintf("Gadget %02d", p)
+		}
+		seedWidgets(t, read, widget{ID: fmt.Sprintf("w%02d", p), Name: name, Priority: new(p)})
+	}
+
+	filter := domains.StructuredFilter{
+		Logic: domains.LogicAnd,
+		Filters: []domains.Filter{
+			{Field: "priority", Mode: domains.ModeRange, Value: domains.RangeNumber{From: 12, To: 26}},
+			{Field: "name", Mode: domains.ModeContains, Value: "Gadget"},
+			{Field: "priority", Mode: domains.ModeGT, Value: 12},
+		},
+		SortFields: []domains.SortField{{Field: "priority", Order: domains.SortOrderAsc}},
+	}
+	want := []int{14, 16, 18, 20, 22, 24, 26}
+
+	var got []int
+	var cursor *string
+	for {
+		result, err := c.Pagination(ctx, domains.Pagination{Filter: filter, PageSize: 3, Cursor: cursor})
+		if err != nil {
+			t.Fatalf("Pagination returned error: %v", err)
+		}
+		for _, r := range result.Data {
+			var p int
+			if _, err := fmt.Sscanf(r.ID, "w%d", &p); err != nil {
+				t.Fatalf("parsing id %q: %v", r.ID, err)
+			}
+			got = append(got, p)
+		}
+		if result.NextCursor == nil {
+			break
+		}
+		cursor = result.NextCursor
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("expected priorities %v across all pages, got %v", want, got)
+	}
+}
+
+func TestPagination_HappyPath_ComplexFilterSearchWithLogicOrAcrossPages(t *testing.T) {
+	t.Parallel()
+	c, read := newPaginationQueryTestCQRS(t)
+	ctx := context.Background()
+	seedWidgets(t, read,
+		widget{ID: "w1", Name: "Alpha", Priority: new(1)},
+		widget{ID: "w2", Name: "Beta", Priority: new(2)},
+		widget{ID: "w3", Name: "Gamma", Priority: new(3)},
+		widget{ID: "w4", Name: "Delta", Priority: new(4)},
+		widget{ID: "w5", Name: "Epsilon", Priority: new(5)},
+	)
+	filter := domains.StructuredFilter{
+		Logic: domains.LogicOr,
+		Filters: []domains.Filter{
+			{Field: "name", Mode: domains.ModeEqual, Value: "Alpha"},
+			{Field: "name", Mode: domains.ModeEqual, Value: "Gamma"},
+			{Field: "name", Mode: domains.ModeEqual, Value: "Epsilon"},
+		},
+		SortFields: []domains.SortField{{Field: "id", Order: domains.SortOrderAsc}},
+	}
+
+	var got []string
+	var cursor *string
+	for {
+		result, err := c.Pagination(ctx, domains.Pagination{Filter: filter, PageSize: 1, Cursor: cursor})
+		if err != nil {
+			t.Fatalf("Pagination returned error: %v", err)
+		}
+		for _, r := range result.Data {
+			got = append(got, r.ID)
+		}
+		if result.NextCursor == nil {
+			break
+		}
+		cursor = result.NextCursor
+	}
+	want := []string{"w1", "w3", "w5"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("expected %v across all pages, got %v", want, got)
+	}
+}
+
+func TestPagination_HappyPath_PreloadAppliesOnEveryPageOfAMultiPageWalk(t *testing.T) {
+	t.Parallel()
+	c, db := newPreloadTestCQRS(t)
+	ctx := context.Background()
+	seedPreloadAuthor(t, db, "a1", "Ada")
+	posts := make([]preloadPost, 6)
+	for i := range posts {
+		posts[i] = preloadPost{ID: fmt.Sprintf("p%d", i), Title: fmt.Sprintf("Post %d", i), AuthorID: "a1"}
+	}
+	if _, err := c.CreateMany(ctx, posts); err != nil {
+		t.Fatalf("seed CreateMany returned error: %v", err)
+	}
+
+	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, preloadPostResource, any, string]{
+		ReadSQLService: &fakeSQLService{db: db},
+		ToResource:     preloadPostToResource,
+	})
+
+	var cursor *string
+	pages := 0
+	for {
+		result, err := pc.Pagination(ctx, domains.Pagination{
+			Filter:   domains.StructuredFilter{SortFields: []domains.SortField{{Field: "id", Order: domains.SortOrderAsc}}},
+			PageSize: 2,
+			Cursor:   cursor,
+		}, "Author")
+		if err != nil {
+			t.Fatalf("Pagination returned error: %v", err)
+		}
+		pages++
+		for _, r := range result.Data {
+			if r.AuthorName != "Ada" {
+				t.Errorf("page %d: expected AuthorName 'Ada' on every row, got %q for %s", pages, r.AuthorName, r.ID)
+			}
+		}
+		if result.NextCursor == nil {
+			break
+		}
+		cursor = result.NextCursor
+		if pages > 6 {
+			t.Fatal("walk did not terminate")
+		}
+	}
+	if pages != 3 {
+		t.Errorf("expected 3 pages for 6 rows at page size 2, got %d", pages)
+	}
+}
+
+// ============================================================================
+// Sad Path: canceled context, closed DB
+// ============================================================================
+
+func TestPagination_SadPath_CanceledContextReturnsErrorNotPanic_UniformPath(t *testing.T) {
+	t.Parallel()
+	c, read := newPaginationQueryTestCQRS(t)
+	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := c.Pagination(ctx, domains.Pagination{
+		Filter: domains.StructuredFilter{SortFields: []domains.SortField{{Field: "id", Order: domains.SortOrderAsc}}},
+	})
+	if err == nil {
+		t.Fatal("expected an error for a pre-canceled context on the uniform path, got nil")
+	}
+}
+
+func TestPagination_SadPath_CanceledContextReturnsErrorNotPanic_MixedPath(t *testing.T) {
+	t.Parallel()
+	c, read := newPaginationQueryTestCQRS(t)
+	seedWidgets(t, read,
+		widget{ID: "a", Name: "Alpha", Priority: new(1)},
+		widget{ID: "b", Name: "Beta", Priority: new(2)},
+	)
+	sortFields := []domains.SortField{
+		{Field: "priority", Order: domains.SortOrderDesc},
+		{Field: "name", Order: domains.SortOrderAsc},
+	}
+	// A real cursor is required to reach the mixed-direction path at all
+	// (cursorIsUniform is trivially true for a nil cursor).
+	page1, err := c.Pagination(context.Background(), domains.Pagination{Filter: domains.StructuredFilter{SortFields: sortFields}, PageSize: 1})
+	if err != nil {
+		t.Fatalf("page1 error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = c.Pagination(ctx, domains.Pagination{
+		Filter: domains.StructuredFilter{SortFields: sortFields}, PageSize: 1, Cursor: page1.NextCursor,
+	})
+	if err == nil {
+		t.Fatal("expected an error for a pre-canceled context on the mixed-direction path, got nil")
+	}
+}
+
+func TestPagination_SadPath_ClosedUnderlyingDBReturnsErrorNotPanic(t *testing.T) {
+	t.Parallel()
+	c, read := newPaginationQueryTestCQRS(t)
+	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha"})
+
+	if err := read.Client().Close(); err != nil {
+		t.Fatalf("closing db: %v", err)
+	}
+	_, err := c.Pagination(context.Background(), domains.Pagination{})
+	if err == nil {
+		t.Fatal("expected an error when the underlying DB is closed, got nil")
+	}
+}
+
+// ============================================================================
+// Poison Pill: overflow, injection, unicode, structural stress
+// ============================================================================
+
+func TestPagination_PoisonPill_MaxIntPageSizeDoesNotOverflowOrMisbehave(t *testing.T) {
+	t.Parallel()
+	c, read := newPaginationQueryTestCQRS(t)
+	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha"}, widget{ID: "w2", Name: "Beta"})
+
+	result, err := c.Pagination(context.Background(), domains.Pagination{
+		Filter:   domains.StructuredFilter{SortFields: []domains.SortField{{Field: "id", Order: domains.SortOrderAsc}}},
+		PageSize: math.MaxInt,
+	})
+	if err != nil {
+		t.Fatalf("Pagination returned error for a math.MaxInt PageSize: %v", err)
+	}
+	if len(result.Data) != 2 {
+		t.Fatalf("expected both seeded rows back, got %d: %+v", len(result.Data), result.Data)
+	}
+	if result.NextCursor != nil {
+		t.Errorf("expected a nil NextCursor (only 2 rows exist), got %v", *result.NextCursor)
+	}
+}
+
+func TestPagination_PoisonPill_SQLInjectionAttemptInFilterValueIsTreatedAsLiteral(t *testing.T) {
+	t.Parallel()
+	c, read := newPaginationQueryTestCQRS(t)
+	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha"}, widget{ID: "w2", Name: "Beta"})
+
+	result, err := c.Pagination(context.Background(), domains.Pagination{
+		Filter: domains.StructuredFilter{Filters: []domains.Filter{
+			{Field: "name", Mode: domains.ModeEqual, Value: "'; DROP TABLE widgets; --"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Pagination returned error: %v", err)
+	}
+	if len(result.Data) != 0 {
+		t.Fatalf("expected zero matches for the injection-attempt literal, got %+v", result.Data)
+	}
+
+	// The table must still exist and be queryable — a real injection would
+	// have dropped it.
+	again, err := c.Pagination(context.Background(), domains.Pagination{})
+	if err != nil {
+		t.Fatalf("table appears to have been affected by the injection attempt: %v", err)
+	}
+	if len(again.Data) != 2 {
+		t.Fatalf("expected both original rows to still be present, got %d", len(again.Data))
+	}
+}
+
+func TestPagination_PoisonPill_UnicodeAndSpecialCharactersRoundTripThroughCursorAndFilter(t *testing.T) {
+	t.Parallel()
+	c, read := newPaginationQueryTestCQRS(t)
+	seedWidgets(t, read,
+		widget{ID: "w1", Name: "日本語 emoji 🎉 name"},
+		widget{ID: "w2", Name: "plain"},
+	)
+
+	// Filter match on the unicode value.
+	result, err := c.Pagination(context.Background(), domains.Pagination{
+		Filter:   domains.StructuredFilter{Filters: []domains.Filter{{Field: "name", Mode: domains.ModeEqual, Value: "日本語 emoji 🎉 name"}}},
+		PageSize: 1,
+	})
+	if err != nil {
+		t.Fatalf("Pagination returned error: %v", err)
+	}
+	if len(result.Data) != 1 || result.Data[0].ID != "w1" {
+		t.Fatalf("expected to match the unicode-named row, got %+v", result.Data)
+	}
+
+	// Cursor round-trip: page through both rows sorted by id.
+	page1, err := c.Pagination(context.Background(), domains.Pagination{
+		Filter:   domains.StructuredFilter{SortFields: []domains.SortField{{Field: "id", Order: domains.SortOrderAsc}}},
+		PageSize: 1,
+	})
+	if err != nil {
+		t.Fatalf("page1 error: %v", err)
+	}
+	if page1.NextCursor == nil {
+		t.Fatal("expected a NextCursor after page1")
+	}
+	page2, err := c.Pagination(context.Background(), domains.Pagination{
+		Filter:   domains.StructuredFilter{SortFields: []domains.SortField{{Field: "id", Order: domains.SortOrderAsc}}},
+		PageSize: 1,
+		Cursor:   page1.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("page2 error: %v", err)
+	}
+	if len(page2.Data) != 1 || page2.Data[0].ID != "w2" {
+		t.Fatalf("expected page2 to be [w2], got %+v", page2.Data)
+	}
+}
+
+func TestPagination_PoisonPill_ManyFiltersCombinedStructurallyStillWorks(t *testing.T) {
+	t.Parallel()
+	c, read := newPaginationQueryTestCQRS(t)
+	widgets := make([]widget, 20)
+	for i := range widgets {
+		widgets[i] = widget{ID: fmt.Sprintf("w%02d", i), Name: fmt.Sprintf("Widget %02d", i), Priority: new(i)}
+	}
+	seedWidgets(t, read, widgets...)
+
+	// 20 OR'd equality filters, one per row -- structural stress on the
+	// nested WhereGroup building, not just correctness of 2-3 filters.
+	filters := make([]domains.Filter, 20)
+	for i := range filters {
+		filters[i] = domains.Filter{Field: "id", Mode: domains.ModeEqual, Value: fmt.Sprintf("w%02d", i)}
+	}
+	result, err := c.Pagination(context.Background(), domains.Pagination{
+		Filter: domains.StructuredFilter{
+			Logic:      domains.LogicOr,
+			Filters:    filters,
+			SortFields: []domains.SortField{{Field: "id", Order: domains.SortOrderAsc}},
+		},
+		PageSize: 100,
+	})
+	if err != nil {
+		t.Fatalf("Pagination returned error: %v", err)
+	}
+	if len(result.Data) != 20 {
+		t.Fatalf("expected all 20 rows to match their own OR'd equality filter, got %d", len(result.Data))
 	}
 }

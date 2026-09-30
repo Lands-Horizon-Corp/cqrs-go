@@ -32,3 +32,11 @@ type SQLService interface {
 	Ping(ctx context.Context) error
 	Client() *bun.DB
 }
+
+type PaginationService[T any] interface {
+	Paginate(ctx context.Context, pagination Pagination) (PaginationResult[T], error)
+	PaginateFilter(ctx context.Context, filter StructuredFilter, pagination Pagination) (PaginationResult[T], error)
+	Filter(ctx context.Context, filter StructuredFilter) (PaginationResult[T], error)
+
+	FilterWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter, pagination Pagination) (PaginationResult[T], error)
+}
