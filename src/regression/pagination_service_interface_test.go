@@ -8,19 +8,22 @@ import (
 )
 
 // This file verifies *pagination.PaginationService satisfies
-// domains.PaginationService[T] — the single-type-parameter interface a
-// consumer can depend on without knowing about TData/TRequest/TID — and
-// that each of its four methods (Paginate/PaginateFilter/Filter/
-// FilterWithTx) behaves as documented, not just that they compile.
+// domains.PaginationService[TData, TRequest, TID] — an interface a consumer
+// can depend on instead of the concrete struct — and that each of its four
+// methods (Paginate/PaginateFilter/Filter/FilterWithTx) behaves as
+// documented, not just that they compile. Both the concrete
+// pagination.PaginationService and this interface hand back raw TData
+// (widget here), never a ToResource-converted view.
 
 // asPaginationServiceInterface fails to compile if *pagination.PaginationService
-// ever stops satisfying domains.PaginationService[widgetResource] — a static
-// assertion, exercised through an actual variable of the interface type so
-// every test below also proves the assignment works, not just the type.
-func asPaginationServiceInterface(t *testing.T) (domains.PaginationService[widgetResource], *fakeSQLService) {
+// ever stops satisfying domains.PaginationService[widget, any, string] — a
+// static assertion, exercised through an actual variable of the interface
+// type so every test below also proves the assignment works, not just the
+// type.
+func asPaginationServiceInterface(t *testing.T) (domains.PaginationService[widget, any, string], *fakeSQLService) {
 	t.Helper()
 	c, read := newPaginationQueryTestCQRS(t)
-	var iface domains.PaginationService[widgetResource] = c
+	var iface domains.PaginationService[widget, any, string] = c
 	return iface, read
 }
 
@@ -136,10 +139,11 @@ func TestPagination_HappyPath_FilterWithTxSeesUncommittedWritesInTheSameTx(t *te
 	}
 }
 
-func TestPagination_SadPath_FilterWithTxReturnsErrorNotPanicOnUnknownFilterField(t *testing.T) {
+func TestPagination_HappyPath_FilterWithTxDropsUnknownFilterFieldInsteadOfErroring(t *testing.T) {
 	t.Parallel()
 	c, read := asPaginationServiceInterface(t)
 	ctx := context.Background()
+	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha"})
 
 	tx, err := read.Client().BeginTx(ctx, nil)
 	if err != nil {
@@ -147,12 +151,15 @@ func TestPagination_SadPath_FilterWithTxReturnsErrorNotPanicOnUnknownFilterField
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = c.FilterWithTx(ctx, &tx,
+	result, err := c.FilterWithTx(ctx, &tx,
 		domains.StructuredFilter{Filters: []domains.Filter{{Field: "not_a_real_column", Mode: domains.ModeEqual, Value: "x"}}},
 		domains.Pagination{},
 	)
-	if err == nil {
-		t.Fatal("expected an error for an unknown filter field, got nil")
+	if err != nil {
+		t.Fatalf("expected the unknown filter field to be dropped rather than error, got: %v", err)
+	}
+	if len(result.Data) != 1 {
+		t.Fatalf("expected the seeded row back (unknown filter ignored), got %+v", result.Data)
 	}
 }
 

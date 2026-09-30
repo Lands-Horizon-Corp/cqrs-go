@@ -93,7 +93,7 @@ func TestIntegration_HappyPath_RealPostgresWriteThenRealKafkaAlignsRealPostgresR
 	go func() { done <- c.Run(ctx) }()
 
 	w := widget{ID: "w1", Name: "gadget", Active: true, Featured: new(true), Priority: new(3)}
-	if _, err := c.Create(ctx, w); err != nil {
+	if _, err := c.CreateFormat(ctx, w); err != nil {
 		t.Fatalf("Create against real postgres-write returned error: %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestIntegration_PoisonPill_ZeroAndNilValuesSurviveRealPostgresRoundTrip(t *
 
 	// Active left false (zero value), every pointer field left nil.
 	w := widget{ID: "w1", Name: "n"}
-	if _, err := c.Create(ctx, w); err != nil {
+	if _, err := c.CreateFormat(ctx, w); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 

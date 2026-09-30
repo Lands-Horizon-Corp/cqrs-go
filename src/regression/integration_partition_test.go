@@ -49,13 +49,12 @@ func partitionedLedgerEntryToResource(e *partitionedLedgerEntry) *partitionedLed
 	return &partitionedLedgerEntryResource{ID: e.ID, CreatedAt: e.CreatedAt, Amount: e.Amount}
 }
 
-func newPartitionTestCQRS(t *testing.T) (*pagination.PaginationService[partitionedLedgerEntry, partitionedLedgerEntryResource, any, string], *fakeSQLService) {
+func newPartitionTestCQRS(t *testing.T) (*pagination.PaginationService[partitionedLedgerEntry, any, string], *fakeSQLService) {
 	t.Helper()
 	skipUnlessInfraReachable(t)
 	read := newPostgresSQLService(t, itReadDSN)
-	p := pagination.NewPaginationService(pagination.PaginationService[partitionedLedgerEntry, partitionedLedgerEntryResource, any, string]{
+	p := pagination.NewPaginationService(pagination.PaginationService[partitionedLedgerEntry, any, string]{
 		ReadSQLService: read,
-		ToResource:     partitionedLedgerEntryToResource,
 		// NewPaginationService's own default ("updated_at DESC") doesn't
 		// apply here — partitionedLedgerEntry has no updated_at column,
 		// only id/created_at/amount (confirmed directly: a call relying on
@@ -180,6 +179,46 @@ func TestIntegration_SadPath_EnablePartitioningNonPKControlColumnReturnsError(t 
 	}
 }
 
+func TestIntegration_SadPath_EnablePartitioningReturnsErrorWhenReadSQLServiceIsNil(t *testing.T) {
+	t.Parallel()
+	// Bypasses NewPaginationService (which panics on this) to reach
+	// EnablePartitioning's own defensive nil-check directly, the same class
+	// of constructor-bypass scenario covered for Pagination itself.
+	raw := pagination.PaginationService[partitionedLedgerEntry, any, string]{}
+	if err := raw.EnablePartitioning(context.Background(), "created_at", "1 day"); err == nil {
+		t.Fatal("expected an error when ReadSQLService is nil, got nil")
+	}
+}
+
+func TestIntegration_SadPath_EnablePartitioningReturnsErrorOnCanceledContext(t *testing.T) {
+	t.Parallel()
+	c, _ := newPartitionTestCQRS(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	// Canceled before EnablePartitioning's first real DB round-trip
+	// (resolving current_schema()) — control-column validation above it is
+	// pure reflection and doesn't touch ctx at all.
+	if err := c.EnablePartitioning(ctx, "created_at", "1 day"); err == nil {
+		t.Fatal("expected an error for a canceled context, got nil")
+	}
+}
+
+func TestIntegration_SadPath_EnablePartitioningInvalidIntervalReturnsError(t *testing.T) {
+	t.Parallel()
+	c, read := newPartitionTestCQRS(t)
+	ctx := context.Background()
+	// Confirmed directly against a real pg_partman instance: create_parent
+	// validates p_interval as a real Postgres interval and rejects garbage
+	// with "invalid input syntax for type interval" — this table must not
+	// already be registered (that check happens before create_parent runs),
+	// so this needs its own fresh table state, same isolated-schema
+	// mechanism the rest of this file relies on.
+	cleanupPartmanRegistration(t, read, qualifiedLedgerTable(t, ctx, read))
+	if err := c.EnablePartitioning(ctx, "created_at", "not-a-real-interval"); err == nil {
+		t.Fatal("expected an error for an invalid pg_partman interval, got nil")
+	}
+}
+
 func TestIntegration_SadPath_NewPaginationServicePanicsWhenReadSQLServiceIsNil(t *testing.T) {
 	t.Parallel()
 	defer func() {
@@ -187,8 +226,7 @@ func TestIntegration_SadPath_NewPaginationServicePanicsWhenReadSQLServiceIsNil(t
 			t.Fatal("expected NewPaginationService to panic when ReadSQLService is nil, got no panic")
 		}
 	}()
-	pagination.NewPaginationService(pagination.PaginationService[partitionedLedgerEntry, partitionedLedgerEntryResource, any, string]{
-		ToResource: partitionedLedgerEntryToResource,
+	pagination.NewPaginationService(pagination.PaginationService[partitionedLedgerEntry, any, string]{
 		// ReadSQLService deliberately left nil.
 	})
 }

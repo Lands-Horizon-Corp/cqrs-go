@@ -82,7 +82,7 @@ func TestPreload_HappyPath_CreateWithExplicitPreloadLoadsRelation(t *testing.T) 
 	ctx := context.Background()
 	seedPreloadAuthor(t, db, "a1", "Ada")
 
-	res, err := c.Create(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"}, "Author")
+	res, err := c.CreateFormat(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"}, "Author")
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestPreload_HappyPath_CreateWithoutPreloadLeavesRelationEmpty(t *testing.T)
 	ctx := context.Background()
 	seedPreloadAuthor(t, db, "a1", "Ada")
 
-	res, err := c.Create(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"})
+	res, err := c.CreateFormat(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestPreload_HappyPath_InstanceDefaultPreloadsAppliesWhenNoArgsGiven(t *test
 	ctx := context.Background()
 	seedPreloadAuthor(t, db, "a1", "Ada")
 
-	res, err := c.Create(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"})
+	res, err := c.CreateFormat(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"})
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestPreload_PoisonPill_ExplicitEmptyStringSuppressesInstanceDefault(t *test
 
 	// Passing "" is Preload's documented escape hatch for "no preloads for
 	// this call", even though the instance has a default configured.
-	res, err := c.Create(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"}, "")
+	res, err := c.CreateFormat(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"}, "")
 	if err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
@@ -144,11 +144,11 @@ func TestPreload_HappyPath_UpdateByIDWithExplicitPreloadLoadsRelation(t *testing
 	ctx := context.Background()
 	seedPreloadAuthor(t, db, "a1", "Ada")
 	seedPreloadAuthor(t, db, "a2", "Grace")
-	if _, err := c.Create(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"}); err != nil {
+	if _, err := c.CreateFormat(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"}); err != nil {
 		t.Fatalf("seed Create returned error: %v", err)
 	}
 
-	res, err := c.UpdateByID(ctx, "p1", preloadPost{ID: "p1", Title: "Updated", AuthorID: "a2"}, "Author")
+	res, err := c.UpdateByIDFormat(ctx, "p1", preloadPost{ID: "p1", Title: "Updated", AuthorID: "a2"}, "Author")
 	if err != nil {
 		t.Fatalf("UpdateByID returned error: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestPreload_SadPath_UnknownRelationNameReturnsError(t *testing.T) {
 	ctx := context.Background()
 	seedPreloadAuthor(t, db, "a1", "Ada")
 
-	_, err := c.Create(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"}, "NotARealRelation")
+	_, err := c.CreateFormat(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"}, "NotARealRelation")
 	if err == nil {
 		t.Fatal("expected an error for an unknown relation name, got nil")
 	}
@@ -179,7 +179,7 @@ func TestPreload_HappyPath_CreateManyLoadsRelationForEveryRecord(t *testing.T) {
 	seedPreloadAuthor(t, db, "a1", "Ada")
 	seedPreloadAuthor(t, db, "a2", "Grace")
 
-	res, err := c.CreateMany(ctx, []preloadPost{
+	res, err := c.CreateManyFormat(ctx, []preloadPost{
 		{ID: "p1", Title: "One", AuthorID: "a1"},
 		{ID: "p2", Title: "Two", AuthorID: "a2"},
 	}, "Author")
@@ -196,7 +196,7 @@ func TestPreload_SadPath_CreateManyUnknownRelationReturnsError(t *testing.T) {
 	c, db := newPreloadTestCQRS(t)
 	seedPreloadAuthor(t, db, "a1", "Ada")
 
-	_, err := c.CreateMany(context.Background(), []preloadPost{{ID: "p1", Title: "One", AuthorID: "a1"}}, "NotARealRelation")
+	_, err := c.CreateManyFormat(context.Background(), []preloadPost{{ID: "p1", Title: "One", AuthorID: "a1"}}, "NotARealRelation")
 	if err == nil {
 		t.Fatal("expected an error for an unknown relation name, got nil")
 	}
@@ -210,7 +210,7 @@ func TestPreload_HappyPath_WithTxVariantsLoadRelations(t *testing.T) {
 	seedPreloadAuthor(t, db, "a2", "Grace")
 
 	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		res, err := c.CreateWithTx(ctx, tx, preloadPost{ID: "p1", Title: "One", AuthorID: "a1"}, "Author")
+		res, err := c.CreateWithTxFormat(ctx, tx, preloadPost{ID: "p1", Title: "One", AuthorID: "a1"}, "Author")
 		if err != nil {
 			return err
 		}
@@ -218,7 +218,7 @@ func TestPreload_HappyPath_WithTxVariantsLoadRelations(t *testing.T) {
 			t.Errorf("CreateWithTx: expected AuthorName 'Ada', got %q", res.AuthorName)
 		}
 
-		many, err := c.CreateManyWithTx(ctx, tx, []preloadPost{{ID: "p2", Title: "Two", AuthorID: "a2"}}, "Author")
+		many, err := c.CreateManyWithTxFormat(ctx, tx, []preloadPost{{ID: "p2", Title: "Two", AuthorID: "a2"}}, "Author")
 		if err != nil {
 			return err
 		}
@@ -226,7 +226,7 @@ func TestPreload_HappyPath_WithTxVariantsLoadRelations(t *testing.T) {
 			t.Errorf("CreateManyWithTx: expected AuthorName 'Grace', got %+v", many)
 		}
 
-		updated, err := c.UpdateByIDWithTx(ctx, tx, "p1", preloadPost{ID: "p1", Title: "One Updated", AuthorID: "a2"}, "Author")
+		updated, err := c.UpdateByIDWithTxFormat(ctx, tx, "p1", preloadPost{ID: "p1", Title: "One Updated", AuthorID: "a2"}, "Author")
 		if err != nil {
 			return err
 		}
@@ -234,7 +234,7 @@ func TestPreload_HappyPath_WithTxVariantsLoadRelations(t *testing.T) {
 			t.Errorf("UpdateByIDWithTx: expected AuthorName 'Grace', got %q", updated.AuthorName)
 		}
 
-		bulkUpdated, err := c.UpdateManyWithTx(ctx, tx, []preloadPost{{ID: "p2", Title: "Two Updated", AuthorID: "a1"}}, "Author")
+		bulkUpdated, err := c.UpdateManyWithTxFormat(ctx, tx, []preloadPost{{ID: "p2", Title: "Two Updated", AuthorID: "a1"}}, "Author")
 		if err != nil {
 			return err
 		}
@@ -254,10 +254,10 @@ func TestPreload_SadPath_WithTxVariantsUnknownRelationReturnsError(t *testing.T)
 	seedPreloadAuthor(t, db, "a1", "Ada")
 
 	err := db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := c.CreateWithTx(ctx, tx, preloadPost{ID: "p1", Title: "One", AuthorID: "a1"}, "NotARealRelation"); err == nil {
+		if _, err := c.CreateWithTxFormat(ctx, tx, preloadPost{ID: "p1", Title: "One", AuthorID: "a1"}, "NotARealRelation"); err == nil {
 			t.Error("CreateWithTx: expected an error for an unknown relation name, got nil")
 		}
-		if _, err := c.CreateManyWithTx(ctx, tx, []preloadPost{{ID: "p2", Title: "Two", AuthorID: "a1"}}, "NotARealRelation"); err == nil {
+		if _, err := c.CreateManyWithTxFormat(ctx, tx, []preloadPost{{ID: "p2", Title: "Two", AuthorID: "a1"}}, "NotARealRelation"); err == nil {
 			t.Error("CreateManyWithTx: expected an error for an unknown relation name, got nil")
 		}
 		return nil
@@ -273,14 +273,14 @@ func TestPreload_HappyPath_UpdateManyLoadsRelationForEveryRecord(t *testing.T) {
 	ctx := context.Background()
 	seedPreloadAuthor(t, db, "a1", "Ada")
 	seedPreloadAuthor(t, db, "a2", "Grace")
-	if _, err := c.CreateMany(ctx, []preloadPost{
+	if _, err := c.CreateManyFormat(ctx, []preloadPost{
 		{ID: "p1", Title: "One", AuthorID: "a1"},
 		{ID: "p2", Title: "Two", AuthorID: "a1"},
 	}); err != nil {
 		t.Fatalf("seed CreateMany returned error: %v", err)
 	}
 
-	res, err := c.UpdateMany(ctx, []preloadPost{
+	res, err := c.UpdateManyFormat(ctx, []preloadPost{
 		{ID: "p1", Title: "One Updated", AuthorID: "a2"},
 		{ID: "p2", Title: "Two Updated", AuthorID: "a2"},
 	}, "Author")
@@ -297,15 +297,15 @@ func TestPreload_SadPath_UpdateWithTxVariantsUnknownRelationReturnsError(t *test
 	c, db := newPreloadTestCQRS(t)
 	ctx := context.Background()
 	seedPreloadAuthor(t, db, "a1", "Ada")
-	if _, err := c.Create(ctx, preloadPost{ID: "p1", Title: "One", AuthorID: "a1"}); err != nil {
+	if _, err := c.CreateFormat(ctx, preloadPost{ID: "p1", Title: "One", AuthorID: "a1"}); err != nil {
 		t.Fatalf("seed Create returned error: %v", err)
 	}
 
 	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := c.UpdateByIDWithTx(ctx, tx, "p1", preloadPost{ID: "p1", Title: "Updated", AuthorID: "a1"}, "NotARealRelation"); err == nil {
+		if _, err := c.UpdateByIDWithTxFormat(ctx, tx, "p1", preloadPost{ID: "p1", Title: "Updated", AuthorID: "a1"}, "NotARealRelation"); err == nil {
 			t.Error("UpdateByIDWithTx: expected an error for an unknown relation name, got nil")
 		}
-		if _, err := c.UpdateManyWithTx(ctx, tx, []preloadPost{{ID: "p1", Title: "Updated", AuthorID: "a1"}}, "NotARealRelation"); err == nil {
+		if _, err := c.UpdateManyWithTxFormat(ctx, tx, []preloadPost{{ID: "p1", Title: "Updated", AuthorID: "a1"}}, "NotARealRelation"); err == nil {
 			t.Error("UpdateManyWithTx: expected an error for an unknown relation name, got nil")
 		}
 		return nil
@@ -320,14 +320,14 @@ func TestPreload_SadPath_UpdateByIDAndUpdateManyUnknownRelationReturnsError(t *t
 	c, db := newPreloadTestCQRS(t)
 	ctx := context.Background()
 	seedPreloadAuthor(t, db, "a1", "Ada")
-	if _, err := c.Create(ctx, preloadPost{ID: "p1", Title: "One", AuthorID: "a1"}); err != nil {
+	if _, err := c.CreateFormat(ctx, preloadPost{ID: "p1", Title: "One", AuthorID: "a1"}); err != nil {
 		t.Fatalf("seed Create returned error: %v", err)
 	}
 
-	if _, err := c.UpdateByID(ctx, "p1", preloadPost{ID: "p1", Title: "Updated", AuthorID: "a1"}, "NotARealRelation"); err == nil {
+	if _, err := c.UpdateByIDFormat(ctx, "p1", preloadPost{ID: "p1", Title: "Updated", AuthorID: "a1"}, "NotARealRelation"); err == nil {
 		t.Error("UpdateByID: expected an error for an unknown relation name, got nil")
 	}
-	if _, err := c.UpdateMany(ctx, []preloadPost{{ID: "p1", Title: "Updated", AuthorID: "a1"}}, "NotARealRelation"); err == nil {
+	if _, err := c.UpdateManyFormat(ctx, []preloadPost{{ID: "p1", Title: "Updated", AuthorID: "a1"}}, "NotARealRelation"); err == nil {
 		t.Error("UpdateMany: expected an error for an unknown relation name, got nil")
 	}
 }

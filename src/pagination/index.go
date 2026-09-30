@@ -9,17 +9,19 @@ import (
 // doc comment for why pagination is a query-side-only operation), so it
 // deliberately doesn't carry a WriteSQLService, Validator, or any of the
 // CDC/broadcast machinery CQRSImpl needs for the write path.
-type PaginationService[TData any, TResponse any, TRequest any, TID comparable] struct {
+type PaginationService[TData any, TRequest any, TID comparable] struct {
 	ReadSQLService domains.SQLService
+
+	// LogService is optional — when set, a filter whose Field doesn't
+	// resolve to a real TData column after normalization (see
+	// utils.NormalizeColumnName) is dropped with a Warn instead of
+	// silently vanishing or failing the whole request.
+	LogService domains.LogService
 
 	// Default column names for ID and sorting.
 	ColumnDefaultID   string
 	ColumnDefaultSort string
 	Preloads          []string
-
-	// ToResource converts a write-model row into the API resource returned
-	// from Pagination.
-	ToResource func(*TData) *TResponse
 }
 
 // NewPaginationService applies the same defaults cqrs.NewCQRS uses
@@ -27,9 +29,9 @@ type PaginationService[TData any, TResponse any, TRequest any, TID comparable] s
 // panics if ReadSQLService is nil — fail-fast at construction time, same
 // as cqrs.NewCQRS does for WriteSQLService, rather than surfacing a nil
 // dependency only when the first page is requested.
-func NewPaginationService[TData any, TResponse any, TRequest any, TID comparable](
-	p PaginationService[TData, TResponse, TRequest, TID],
-) *PaginationService[TData, TResponse, TRequest, TID] {
+func NewPaginationService[TData any, TRequest any, TID comparable](
+	p PaginationService[TData, TRequest, TID],
+) *PaginationService[TData, TRequest, TID] {
 	if p.ColumnDefaultID == "" {
 		p.ColumnDefaultID = "id"
 	}
@@ -39,11 +41,11 @@ func NewPaginationService[TData any, TResponse any, TRequest any, TID comparable
 	if p.ReadSQLService == nil {
 		panic("ReadSQLService must be initialized")
 	}
-	return &PaginationService[TData, TResponse, TRequest, TID]{
+	return &PaginationService[TData, TRequest, TID]{
 		ReadSQLService:    p.ReadSQLService,
+		LogService:        p.LogService,
 		ColumnDefaultID:   p.ColumnDefaultID,
 		ColumnDefaultSort: p.ColumnDefaultSort,
 		Preloads:          p.Preloads,
-		ToResource:        p.ToResource,
 	}
 }

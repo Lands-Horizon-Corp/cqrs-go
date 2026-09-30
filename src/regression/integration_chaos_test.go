@@ -83,14 +83,14 @@ func TestIntegration_Chaos_PostgresWriteRestartRecoversAutomatically(t *testing.
 		ToResource:      widgetToResource,
 	})
 
-	if _, err := c.Create(ctx, widget{ID: "before-restart", Name: "n"}); err != nil {
+	if _, err := c.CreateFormat(ctx, widget{ID: "before-restart", Name: "n"}); err != nil {
 		t.Fatalf("Create before restart returned error: %v", err)
 	}
 
 	restartContainer(t, "cqrs-postgres-write")
 
 	waitForCondition(t, 60*time.Second, func() bool {
-		_, err := c.Create(ctx, widget{ID: "after-restart", Name: "n"})
+		_, err := c.CreateFormat(ctx, widget{ID: "after-restart", Name: "n"})
 		return err == nil
 	}, "expected Create to eventually succeed again once postgres-write is back")
 

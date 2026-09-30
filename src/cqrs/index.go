@@ -31,6 +31,7 @@ type CQRSImpl[TData any, TResponse any, TRequest any, TID comparable] struct {
 	LogService           domains.LogService
 	BroadcastService     domains.BroadcastService
 	MessageBrokerService domains.MessageBrokerService
+	paginationService    domains.PaginationService[TData, TRequest, TID]
 
 	// Validator for struct validation
 	Validator *validator.Validate

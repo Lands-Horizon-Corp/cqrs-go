@@ -354,7 +354,7 @@ func (h *cdcHarness) waitForRunToStop(t *testing.T, done <-chan error, timeout t
 
 func seedWidget(t *testing.T, c *cqrs.CQRSImpl[widget, widgetResource, any, string], w widget) {
 	t.Helper()
-	if _, err := c.Create(context.Background(), w); err != nil {
+	if _, err := c.CreateFormat(context.Background(), w); err != nil {
 		t.Fatalf("seeding widget: %v", err)
 	}
 }

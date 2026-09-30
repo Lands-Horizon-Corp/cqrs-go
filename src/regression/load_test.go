@@ -100,7 +100,7 @@ func TestLoad_BulkCreateUpdateDeleteThroughput(t *testing.T) {
 
 	updateWriteStart := time.Now()
 	runWorkerPool(updateWorkers, updateIDs, func(id string) {
-		if _, err := h.c.UpdateByID(ctx, id, widget{ID: id, Name: "updated"}); err != nil {
+		if _, err := h.c.UpdateByIDFormat(ctx, id, widget{ID: id, Name: "updated"}); err != nil {
 			t.Errorf("UpdateByID(%s) returned error: %v", id, err)
 		}
 	})
@@ -201,7 +201,7 @@ func bulkCreate(t *testing.T, h *cdcHarnessIT, ids []string) {
 		for _, id := range ids[i:end] {
 			batch = append(batch, widget{ID: id, Name: "created"})
 		}
-		if _, err := h.c.CreateMany(ctx, batch); err != nil {
+		if _, err := h.c.CreateManyFormat(ctx, batch); err != nil {
 			t.Fatalf("CreateMany chunk [%d:%d] returned error: %v", i, end, err)
 		}
 	}

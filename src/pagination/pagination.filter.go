@@ -17,7 +17,7 @@ import (
 // each one is validated against TData's real bun-tagged columns before
 // being used. Column names always go through bun.Ident (never
 // string-concatenated) and values are always bound via "?" placeholders.
-func (c *PaginationService[TData, TResponse, TRequest, TID]) applyFilters(
+func (c *PaginationService[TData, TRequest, TID]) applyFilters(
 	q *bun.SelectQuery, filterRoot domains.StructuredFilter,
 ) (*bun.SelectQuery, error) {
 	if len(filterRoot.Filters) == 0 {

@@ -71,7 +71,7 @@ func TestPagination_Smoke_PreloadPopulatesRelation(t *testing.T) {
 	c, db := newPreloadTestCQRS(t)
 	ctx := context.Background()
 	seedPreloadAuthor(t, db, "a1", "Ada")
-	if _, err := c.Create(ctx, preloadPost{ID: "p1", Title: "One", AuthorID: "a1"}); err != nil {
+	if _, err := c.CreateFormat(ctx, preloadPost{ID: "p1", Title: "One", AuthorID: "a1"}); err != nil {
 		t.Fatalf("seed Create returned error: %v", err)
 	}
 
@@ -80,7 +80,7 @@ func TestPagination_Smoke_PreloadPopulatesRelation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Pagination returned error: %v", err)
 	}
-	if len(result.Data) != 1 || result.Data[0].AuthorName != "Ada" {
+	if len(result.Data) != 1 || result.Data[0].Author == nil || result.Data[0].Author.Name != "Ada" {
 		t.Fatalf("expected the preloaded author name 'Ada', got %+v", result.Data)
 	}
 }

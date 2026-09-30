@@ -13,12 +13,34 @@ func TestUpdateByID_HappyPath_ChangesPersist(t *testing.T) {
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "w1", Name: "old", Active: true, Featured: new(true)})
 
-	res, err := c.UpdateByID(ctx, "w1", widget{ID: "w1", Name: "new", Active: true, Featured: new(true)})
+	res, err := c.UpdateByIDFormat(ctx, "w1", widget{ID: "w1", Name: "new", Active: true, Featured: new(true)})
 	if err != nil {
 		t.Fatalf("UpdateByID returned error: %v", err)
 	}
 	if res.Name != "new" {
 		t.Errorf("expected resource name 'new', got %q", res.Name)
+	}
+	if got, ok := readWidgetFrom(t, write, "w1"); !ok || got.Name != "new" {
+		t.Errorf("expected db name 'new', got %q (found=%v)", got.Name, ok)
+	}
+}
+
+// TestUpdateByID_HappyPath_ReturnsTDataDirectlyNotResource pins UpdateByID's
+// return type at *widget (TData), distinguishing it from UpdateByIDFormat
+// which converts through ToResource.
+func TestUpdateByID_HappyPath_ReturnsTDataDirectlyNotResource(t *testing.T) {
+	t.Parallel()
+	c, write := newTestCQRS(t)
+	ctx := context.Background()
+	seedWidget(t, c, widget{ID: "w1", Name: "old"})
+
+	res, err := c.UpdateByID(ctx, "w1", widget{ID: "w1", Name: "new"})
+	if err != nil {
+		t.Fatalf("UpdateByID returned error: %v", err)
+	}
+	var _ *widget = res
+	if res.Name != "new" {
+		t.Fatalf("unexpected TData name: %q", res.Name)
 	}
 	if got, ok := readWidgetFrom(t, write, "w1"); !ok || got.Name != "new" {
 		t.Errorf("expected db name 'new', got %q (found=%v)", got.Name, ok)
@@ -40,7 +62,7 @@ func TestUpdateByID_NonPointerBool_FalseActuallyPersists(t *testing.T) {
 		t.Fatalf("setup invariant broken: expected seeded row to have active=true")
 	}
 
-	if _, err := c.UpdateByID(ctx, "w1", widget{ID: "w1", Name: "n", Active: false}); err != nil {
+	if _, err := c.UpdateByIDFormat(ctx, "w1", widget{ID: "w1", Name: "n", Active: false}); err != nil {
 		t.Fatalf("UpdateByID returned error: %v", err)
 	}
 
@@ -61,7 +83,7 @@ func TestUpdateByID_PointerBool_NilOverwritesToNULL(t *testing.T) {
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "w1", Name: "n", Featured: new(true), Notes: new("hi"), Priority: new(5)})
 
-	if _, err := c.UpdateByID(ctx, "w1", widget{ID: "w1", Name: "n"}); err != nil {
+	if _, err := c.UpdateByIDFormat(ctx, "w1", widget{ID: "w1", Name: "n"}); err != nil {
 		t.Fatalf("UpdateByID returned error: %v", err)
 	}
 
@@ -90,7 +112,7 @@ func TestUpdateByID_PointerBool_ExplicitFalseDistinctFromNil(t *testing.T) {
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "w1", Name: "n", Featured: new(true)})
 
-	if _, err := c.UpdateByID(ctx, "w1", widget{ID: "w1", Name: "n", Featured: new(false)}); err != nil {
+	if _, err := c.UpdateByIDFormat(ctx, "w1", widget{ID: "w1", Name: "n", Featured: new(false)}); err != nil {
 		t.Fatalf("UpdateByID returned error: %v", err)
 	}
 
@@ -110,7 +132,7 @@ func TestUpdateByID_SadPath_NonexistentIDAndValidation(t *testing.T) {
 	t.Parallel()
 	t.Run("Nonexistent ID Returns ErrNoRows", func(t *testing.T) {
 		c, _ := newTestCQRS(t)
-		_, err := c.UpdateByID(context.Background(), "missing", widget{ID: "missing", Name: "n"})
+		_, err := c.UpdateByIDFormat(context.Background(), "missing", widget{ID: "missing", Name: "n"})
 		if !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("expected sql.ErrNoRows, got %v", err)
 		}
@@ -121,7 +143,7 @@ func TestUpdateByID_SadPath_NonexistentIDAndValidation(t *testing.T) {
 		ctx := context.Background()
 		seedWidget(t, c, widget{ID: "w1", Name: "original"})
 
-		_, err := c.UpdateByID(ctx, "w1", widget{ID: "w1", Name: ""}) // Name is required
+		_, err := c.UpdateByIDFormat(ctx, "w1", widget{ID: "w1", Name: ""}) // Name is required
 		if err == nil {
 			t.Fatal("expected validation error for empty Name, got nil")
 		}
@@ -136,7 +158,7 @@ func TestUpdateByID_SadPath_NonexistentIDAndValidation(t *testing.T) {
 		seedWidget(t, c, widget{ID: "w1", Name: "n"})
 		dropWidgetsTable(t, write)
 
-		_, err := c.UpdateByID(ctx, "w1", widget{ID: "w1", Name: "n2"})
+		_, err := c.UpdateByIDFormat(ctx, "w1", widget{ID: "w1", Name: "n2"})
 		if err == nil {
 			t.Fatal("expected a DB error once the table is gone, got nil")
 		}
@@ -150,7 +172,7 @@ func TestUpdateByID_HappyPath_NilToResourceReturnsNilWithoutError(t *testing.T) 
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "w1", Name: "n"})
 
-	res, err := c.UpdateByID(ctx, "w1", widget{ID: "w1", Name: "n2"})
+	res, err := c.UpdateByIDFormat(ctx, "w1", widget{ID: "w1", Name: "n2"})
 	if err != nil {
 		t.Fatalf("UpdateByID returned error: %v", err)
 	}
@@ -178,7 +200,7 @@ func TestUpdateByID_PoisonPill_ForgottenFieldsGetClobbered(t *testing.T) {
 
 	// Caller only intended to rename the widget, but built a fresh
 	// zero-value struct and only set ID/Name.
-	if _, err := c.UpdateByID(ctx, "w1", widget{ID: "w1", Name: "renamed"}); err != nil {
+	if _, err := c.UpdateByIDFormat(ctx, "w1", widget{ID: "w1", Name: "renamed"}); err != nil {
 		t.Fatalf("UpdateByID returned error: %v", err)
 	}
 
@@ -205,7 +227,7 @@ func TestUpdateMany_HappyPath_UpdatesAllRowsInOneStatement(t *testing.T) {
 	seedWidget(t, c, widget{ID: "a", Name: "old-a", Active: false})
 	seedWidget(t, c, widget{ID: "b", Name: "old-b", Active: false})
 
-	res, err := c.UpdateMany(ctx, []widget{
+	res, err := c.UpdateManyFormat(ctx, []widget{
 		{ID: "a", Name: "new-a", Active: true},
 		{ID: "b", Name: "new-b", Active: true},
 	})
@@ -224,10 +246,30 @@ func TestUpdateMany_HappyPath_UpdatesAllRowsInOneStatement(t *testing.T) {
 	}
 }
 
+func TestUpdateMany_HappyPath_ReturnsTDataDirectlyNotResource(t *testing.T) {
+	t.Parallel()
+	c, write := newTestCQRS(t)
+	ctx := context.Background()
+	seedWidget(t, c, widget{ID: "a", Name: "old-a"})
+	seedWidget(t, c, widget{ID: "b", Name: "old-b"})
+
+	res, err := c.UpdateMany(ctx, []widget{{ID: "a", Name: "new-a"}, {ID: "b", Name: "new-b"}})
+	if err != nil {
+		t.Fatalf("UpdateMany returned error: %v", err)
+	}
+	var _ []*widget = res
+	if len(res) != 2 || res[0].Name != "new-a" || res[1].Name != "new-b" {
+		t.Fatalf("unexpected TData slice: %+v", res)
+	}
+	if got, ok := readWidgetFrom(t, write, "a"); !ok || got.Name != "new-a" {
+		t.Errorf("expected db name 'new-a', got %q (found=%v)", got.Name, ok)
+	}
+}
+
 func TestUpdateMany_SadPath_EmptyInputIsANoOp(t *testing.T) {
 	t.Parallel()
 	c, _ := newTestCQRS(t)
-	res, err := c.UpdateMany(context.Background(), nil)
+	res, err := c.UpdateManyFormat(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("expected no error for empty input, got %v", err)
 	}
@@ -242,7 +284,7 @@ func TestUpdateMany_SadPath_ValidationFailureBlocksWholeBatch(t *testing.T) {
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "a", Name: "original"})
 
-	_, err := c.UpdateMany(ctx, []widget{
+	_, err := c.UpdateManyFormat(ctx, []widget{
 		{ID: "a", Name: "ok"},
 		{ID: "b", Name: ""}, // Name required
 	})
@@ -264,7 +306,7 @@ func TestUpdateMany_PoisonPill_MissingIDsAreSilentlyIgnored(t *testing.T) {
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "a", Name: "original"})
 
-	_, err := c.UpdateMany(ctx, []widget{
+	_, err := c.UpdateManyFormat(ctx, []widget{
 		{ID: "a", Name: "updated"},
 		{ID: "ghost", Name: "updated"},
 	})
@@ -286,7 +328,7 @@ func TestUpdateMany_HappyPath_NilToResourceReturnsNilResponses(t *testing.T) {
 	ctx := context.Background()
 	seedWidget(t, c, widget{ID: "a", Name: "old"})
 
-	res, err := c.UpdateMany(ctx, []widget{{ID: "a", Name: "new"}})
+	res, err := c.UpdateManyFormat(ctx, []widget{{ID: "a", Name: "new"}})
 	if err != nil {
 		t.Fatalf("UpdateMany returned error: %v", err)
 	}

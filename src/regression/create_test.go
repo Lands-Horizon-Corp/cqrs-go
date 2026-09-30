@@ -6,12 +6,52 @@ import (
 	"testing"
 )
 
+// TestCreate_HappyPath_ReturnsTDataDirectlyNotResource verifies Create's
+// return type is *widget (TData), not *widgetResource (TResponse) — the
+// `var _ *widget = res` line is a compile-time pin on that, since Go would
+// simply fail to build this file if Create's signature ever regressed back
+// to returning *TResponse. CreateFormat (tested elsewhere in this file) is
+// the one that goes through ToResource; Create never does, even though
+// ToResource is configured here via newTestCQRS.
+func TestCreate_HappyPath_ReturnsTDataDirectlyNotResource(t *testing.T) {
+	t.Parallel()
+	c, write := newTestCQRS(t)
+	ctx := context.Background()
+
+	res, err := c.Create(ctx, widget{ID: "w1", Name: "gadget", Active: true})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	var _ *widget = res
+	if res == nil || res.ID != "w1" || res.Name != "gadget" || !res.Active {
+		t.Fatalf("unexpected TData: %+v", res)
+	}
+	if got, ok := readWidgetFrom(t, write, "w1"); !ok || got.Name != "gadget" {
+		t.Fatalf("expected row to exist in write db, got %+v (found=%v)", got, ok)
+	}
+}
+
+func TestCreateMany_HappyPath_ReturnsTDataDirectlyNotResource(t *testing.T) {
+	t.Parallel()
+	c, _ := newTestCQRS(t)
+	ctx := context.Background()
+
+	res, err := c.CreateMany(ctx, []widget{{ID: "a", Name: "one"}, {ID: "b", Name: "two"}})
+	if err != nil {
+		t.Fatalf("CreateMany returned error: %v", err)
+	}
+	var _ []*widget = res
+	if len(res) != 2 || res[0].Name != "one" || res[1].Name != "two" {
+		t.Fatalf("unexpected TData slice: %+v", res)
+	}
+}
+
 func TestCreate_HappyPath_InsertsAndReturnsResource(t *testing.T) {
 	t.Parallel()
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 
-	res, err := c.Create(ctx, widget{
+	res, err := c.CreateFormat(ctx, widget{
 		ID:       "w1",
 		Name:     "gadget",
 		Active:   true,
@@ -46,7 +86,7 @@ func TestCreate_HappyPath_NilToResourceReturnsNilWithoutError(t *testing.T) {
 	t.Parallel()
 	write := newFakeSQLService(t)
 	c := newCQRSNoResource(t, write)
-	res, err := c.Create(context.Background(), widget{ID: "w1", Name: "gadget"})
+	res, err := c.CreateFormat(context.Background(), widget{ID: "w1", Name: "gadget"})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -61,7 +101,7 @@ func TestCreate_SadPath_ValidationAndConstraintFailures(t *testing.T) {
 		c, write := newTestCQRS(t)
 		ctx := context.Background()
 
-		_, err := c.Create(ctx, widget{ID: "w1"}) // Name is required
+		_, err := c.CreateFormat(ctx, widget{ID: "w1"}) // Name is required
 		if err == nil {
 			t.Fatal("expected validation error for empty Name, got nil")
 		}
@@ -79,10 +119,10 @@ func TestCreate_SadPath_ValidationAndConstraintFailures(t *testing.T) {
 		c, _ := newTestCQRS(t)
 		ctx := context.Background()
 
-		if _, err := c.Create(ctx, widget{ID: "dup", Name: "first"}); err != nil {
+		if _, err := c.CreateFormat(ctx, widget{ID: "dup", Name: "first"}); err != nil {
 			t.Fatalf("first insert failed: %v", err)
 		}
-		_, err := c.Create(ctx, widget{ID: "dup", Name: "second"})
+		_, err := c.CreateFormat(ctx, widget{ID: "dup", Name: "second"})
 		if err == nil {
 			t.Fatal("expected error inserting duplicate primary key, got nil")
 		}
@@ -98,7 +138,7 @@ func TestCreate_PoisonPill_ZeroAndAbsentValues(t *testing.T) {
 		// Active left at its zero value (false) and every pointer field
 		// left nil ("absent"): confirm these are actually written, not
 		// silently skipped or coerced into something else.
-		if _, err := c.Create(ctx, widget{ID: "w1", Name: "n"}); err != nil {
+		if _, err := c.CreateFormat(ctx, widget{ID: "w1", Name: "n"}); err != nil {
 			t.Fatalf("Create returned error: %v", err)
 		}
 
@@ -127,7 +167,7 @@ func TestCreate_PoisonPill_ZeroAndAbsentValues(t *testing.T) {
 		c, write := newTestCQRS(t)
 		ctx := context.Background()
 
-		if _, err := c.Create(ctx, widget{
+		if _, err := c.CreateFormat(ctx, widget{
 			ID: "w1", Name: "n",
 			Featured: new(false), // explicitly false, not nil
 			Notes:    new(""),    // explicitly empty string, not nil
@@ -156,7 +196,7 @@ func TestCreate_PoisonPill_ZeroAndAbsentValues(t *testing.T) {
 		ctx := context.Background()
 
 		poison := "'; DROP TABLE widgets; --"
-		if _, err := c.Create(ctx, widget{ID: "w1", Name: poison}); err != nil {
+		if _, err := c.CreateFormat(ctx, widget{ID: "w1", Name: poison}); err != nil {
 			t.Fatalf("Create returned error: %v", err)
 		}
 
@@ -178,7 +218,7 @@ func TestCreateMany_HappyPath_InsertsAllAndReturnsResources(t *testing.T) {
 	c, write := newTestCQRS(t)
 	ctx := context.Background()
 
-	res, err := c.CreateMany(ctx, []widget{
+	res, err := c.CreateManyFormat(ctx, []widget{
 		{ID: "a", Name: "one", Active: true},
 		{ID: "b", Name: "two", Featured: new(false)},
 	})
@@ -201,7 +241,7 @@ func TestCreateMany_HappyPath_InsertsAllAndReturnsResources(t *testing.T) {
 func TestCreateMany_SadPath_EmptyInputIsANoOp(t *testing.T) {
 	t.Parallel()
 	c, _ := newTestCQRS(t)
-	res, err := c.CreateMany(context.Background(), nil)
+	res, err := c.CreateManyFormat(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("expected no error for empty input, got %v", err)
 	}
@@ -216,7 +256,7 @@ func TestCreateMany_SadPath_ValidationFailureBlocksWholeBatch(t *testing.T) {
 	ctx := context.Background()
 
 	// The second item is invalid; nothing in the batch should be inserted.
-	_, err := c.CreateMany(ctx, []widget{
+	_, err := c.CreateManyFormat(ctx, []widget{
 		{ID: "a", Name: "ok"},
 		{ID: "b", Name: ""}, // Name required
 	})
@@ -237,7 +277,7 @@ func TestCreateMany_SadPath_DBErrorOnDuplicateID(t *testing.T) {
 	c, _ := newTestCQRS(t)
 	ctx := context.Background()
 
-	_, err := c.CreateMany(ctx, []widget{
+	_, err := c.CreateManyFormat(ctx, []widget{
 		{ID: "dup", Name: "one"},
 		{ID: "dup", Name: "two"},
 	})
@@ -251,7 +291,7 @@ func TestCreateMany_HappyPath_NilToResourceReturnsNilResponses(t *testing.T) {
 	write := newFakeSQLService(t)
 	c := newCQRSNoResource(t, write)
 
-	res, err := c.CreateMany(context.Background(), []widget{{ID: "a", Name: "n"}})
+	res, err := c.CreateManyFormat(context.Background(), []widget{{ID: "a", Name: "n"}})
 	if err != nil {
 		t.Fatalf("CreateMany returned error: %v", err)
 	}

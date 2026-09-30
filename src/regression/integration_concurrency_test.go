@@ -68,7 +68,7 @@ func TestIntegration_HappyPath_ConcurrentCreatesAcrossManyEntities(t *testing.T)
 		go func(i int) {
 			defer wg.Done()
 			w := widget{ID: fmt.Sprintf("w%02d", i), Name: fmt.Sprintf("gadget-%d", i), Active: i%2 == 0}
-			if _, err := h.c.Create(ctx, w); err != nil {
+			if _, err := h.c.CreateFormat(ctx, w); err != nil {
 				t.Errorf("Create(%s) returned error: %v", w.ID, err)
 				return
 			}
@@ -131,7 +131,7 @@ func TestIntegration_HappyPath_ConcurrentCreateRaceOnSameID(t *testing.T) {
 			defer wg.Done()
 			<-start // line everyone up to maximize actual collision
 			w := widget{ID: "race1", Name: fmt.Sprintf("attempt-%d", i)}
-			if _, err := h.c.Create(ctx, w); err == nil {
+			if _, err := h.c.CreateFormat(ctx, w); err == nil {
 				atomic.AddInt32(&succeeded, 1)
 			}
 		}(i)
@@ -180,7 +180,7 @@ func TestIntegration_HappyPath_ConcurrentUpdatesConvergeToActualFinalState(t *te
 	go func() { done <- h.c.Run(ctx) }()
 
 	seed := widget{ID: "w1", Name: "seed", Priority: new(0)}
-	if _, err := h.c.Create(ctx, seed); err != nil {
+	if _, err := h.c.CreateFormat(ctx, seed); err != nil {
 		t.Fatalf("seed Create returned error: %v", err)
 	}
 
@@ -191,7 +191,7 @@ func TestIntegration_HappyPath_ConcurrentUpdatesConvergeToActualFinalState(t *te
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			_, _ = h.c.UpdateByID(ctx, "w1", widget{ID: "w1", Name: fmt.Sprintf("racer-%d", i), Priority: new(i)})
+			_, _ = h.c.UpdateByIDFormat(ctx, "w1", widget{ID: "w1", Name: fmt.Sprintf("racer-%d", i), Priority: new(i)})
 		}(i)
 	}
 	close(start)
@@ -241,7 +241,7 @@ func TestIntegration_PoisonPill_FailedWritesNeverReachReadDB(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			w := widget{ID: fmt.Sprintf("ok%02d", i), Name: fmt.Sprintf("gadget-%d", i)}
-			if _, err := h.c.Create(ctx, w); err != nil {
+			if _, err := h.c.CreateFormat(ctx, w); err != nil {
 				t.Errorf("Create(%s) unexpectedly failed: %v", w.ID, err)
 				return
 			}
@@ -256,7 +256,7 @@ func TestIntegration_PoisonPill_FailedWritesNeverReachReadDB(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			w := widget{ID: fmt.Sprintf("bad%02d", i), Name: ""}
-			if _, err := h.c.Create(ctx, w); err == nil {
+			if _, err := h.c.CreateFormat(ctx, w); err == nil {
 				t.Errorf("Create(%s) with empty Name unexpectedly succeeded", w.ID)
 			}
 		}(i)
@@ -318,14 +318,14 @@ func TestIntegration_HappyPath_HighConcurrencyBatchCoalescing(t *testing.T) {
 			id := fmt.Sprintf("life%02d", i)
 
 			created := widget{ID: id, Name: "created"}
-			if _, err := h.c.Create(ctx, created); err != nil {
+			if _, err := h.c.CreateFormat(ctx, created); err != nil {
 				t.Errorf("Create(%s) returned error: %v", id, err)
 				return
 			}
 			publishEnvelope(t, h.broker, ctx, h.topic, "evt-"+id+"-c", domains.ChangeTypeCreated, created)
 
 			updated := widget{ID: id, Name: "updated"}
-			if _, err := h.c.UpdateByID(ctx, id, updated); err != nil {
+			if _, err := h.c.UpdateByIDFormat(ctx, id, updated); err != nil {
 				t.Errorf("UpdateByID(%s) returned error: %v", id, err)
 				return
 			}

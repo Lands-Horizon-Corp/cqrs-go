@@ -33,10 +33,18 @@ type SQLService interface {
 	Client() *bun.DB
 }
 
-type PaginationService[T any] interface {
-	Paginate(ctx context.Context, pagination Pagination) (PaginationResult[T], error)
-	PaginateFilter(ctx context.Context, filter StructuredFilter, pagination Pagination) (PaginationResult[T], error)
-	Filter(ctx context.Context, filter StructuredFilter) (PaginationResult[T], error)
+// PaginationService mirrors the three type parameters of its one real
+// implementation (pagination.PaginationService[TData, TRequest, TID]) so a
+// struct that already carries all three as its own type parameters —
+// CQRSImpl, for one — can hold this interface typed with exactly its own
+// TData/TRequest/TID, instead of having to fix one of them to a concrete
+// type just to name the interface. There is no TResponse here: pagination
+// only ever hands back the raw TData rows straight from SQL, never a
+// ToResource-converted view.
+type PaginationService[TData any, TRequest any, TID comparable] interface {
+	Paginate(ctx context.Context, pagination Pagination) (PaginationResult[TData], error)
+	PaginateFilter(ctx context.Context, filter StructuredFilter, pagination Pagination) (PaginationResult[TData], error)
+	Filter(ctx context.Context, filter StructuredFilter) (PaginationResult[TData], error)
 
-	FilterWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter, pagination Pagination) (PaginationResult[T], error)
+	FilterWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter, pagination Pagination) (PaginationResult[TData], error)
 }

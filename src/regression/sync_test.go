@@ -43,7 +43,7 @@ func TestSync_HappyPath_CreateThenCDCAlignsReadWithWrite(t *testing.T) {
 	done := h.runInBackground(ctx)
 
 	w := widget{ID: "w1", Name: "gadget", Active: true, Featured: new(true), Notes: new("hi"), Priority: new(3)}
-	if _, err := h.c.Create(ctx, w); err != nil {
+	if _, err := h.c.CreateFormat(ctx, w); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 
@@ -90,7 +90,7 @@ func TestSync_HappyPath_CreateWithZeroAndAbsentValuesAligns(t *testing.T) {
 
 	// Every optional field left at its zero/absent value.
 	w := widget{ID: "w1", Name: "n"}
-	if _, err := h.c.Create(ctx, w); err != nil {
+	if _, err := h.c.CreateFormat(ctx, w); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 	emitFor(t, h, "evt-1", domains.ChangeTypeCreated, w)
@@ -119,14 +119,14 @@ func TestSync_HappyPath_UpdateThenCDCAlignsReadWithWrite(t *testing.T) {
 	done := h.runInBackground(ctx)
 
 	seed := widget{ID: "w1", Name: "old", Active: false, Featured: new(false)}
-	if _, err := h.c.Create(ctx, seed); err != nil {
+	if _, err := h.c.CreateFormat(ctx, seed); err != nil {
 		t.Fatalf("seed Create returned error: %v", err)
 	}
 	emitFor(t, h, "evt-created", domains.ChangeTypeCreated, seed)
 	h.broadcast.waitForCall(t, 2*time.Second)
 
 	updated := widget{ID: "w1", Name: "new", Active: true, Featured: new(true), Priority: new(9)}
-	if _, err := h.c.UpdateByID(ctx, "w1", updated); err != nil {
+	if _, err := h.c.UpdateByIDFormat(ctx, "w1", updated); err != nil {
 		t.Fatalf("UpdateByID returned error: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestSync_HappyPath_DeleteThenCDCAlignsReadWithWrite(t *testing.T) {
 	done := h.runInBackground(ctx)
 
 	seed := widget{ID: "w1", Name: "n"}
-	if _, err := h.c.Create(ctx, seed); err != nil {
+	if _, err := h.c.CreateFormat(ctx, seed); err != nil {
 		t.Fatalf("seed Create returned error: %v", err)
 	}
 	emitFor(t, h, "evt-created", domains.ChangeTypeCreated, seed)
@@ -423,7 +423,7 @@ func TestSync_PoisonPill_ComplexDataWithMixedNilsAligns(t *testing.T) {
 		Priority:  new(-7), // explicit negative
 		ExpiresAt: new(exp),
 	}
-	if _, err := h.c.Create(ctx, w); err != nil {
+	if _, err := h.c.CreateFormat(ctx, w); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 	emitFor(t, h, "evt-1", domains.ChangeTypeCreated, w)

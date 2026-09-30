@@ -24,9 +24,8 @@ func TestIntegrationChaos_PaginationDuringPostgresRestartReturnsErrorThenRecover
 	read := newPostgresSQLService(t, itReadDSN)
 	ctx := context.Background()
 
-	p := pagination.NewPaginationService(pagination.PaginationService[widget, widgetResource, any, string]{
+	p := pagination.NewPaginationService(pagination.PaginationService[widget, any, string]{
 		ReadSQLService: read,
-		ToResource:     widgetToResource,
 	})
 
 	seed := []widget{{ID: "before-restart", Name: "n"}}

@@ -21,12 +21,11 @@ import (
 
 // newPaginationQueryTestCQRS points ReadSQLService at an in-memory SQLite db
 // using the same fakeSQLService/widget fixture as the rest of this suite.
-func newPaginationQueryTestCQRS(t *testing.T) (*pagination.PaginationService[widget, widgetResource, any, string], *fakeSQLService) {
+func newPaginationQueryTestCQRS(t *testing.T) (*pagination.PaginationService[widget, any, string], *fakeSQLService) {
 	t.Helper()
 	read := newFakeSQLService(t)
-	p := pagination.NewPaginationService(pagination.PaginationService[widget, widgetResource, any, string]{
+	p := pagination.NewPaginationService(pagination.PaginationService[widget, any, string]{
 		ReadSQLService: read,
-		ToResource:     widgetToResource,
 	})
 	return p, read
 }
@@ -34,10 +33,9 @@ func newPaginationQueryTestCQRS(t *testing.T) (*pagination.PaginationService[wid
 // newPaginationPreloadService builds a PaginationService over the same
 // preloadPost/preloadAuthor fixture pair preload_test.go uses for the
 // write-path preload tests, sharing db so both sides see the same data.
-func newPaginationPreloadService(db *bun.DB) *pagination.PaginationService[preloadPost, preloadPostResource, any, string] {
-	return pagination.NewPaginationService(pagination.PaginationService[preloadPost, preloadPostResource, any, string]{
+func newPaginationPreloadService(db *bun.DB) *pagination.PaginationService[preloadPost, any, string] {
+	return pagination.NewPaginationService(pagination.PaginationService[preloadPost, any, string]{
 		ReadSQLService: &fakeSQLService{db: db},
-		ToResource:     preloadPostToResource,
 	})
 }
 
@@ -199,16 +197,15 @@ func TestPagination_HappyPath_PreloadIntegration(t *testing.T) {
 	c, db := newPreloadTestCQRS(t)
 	ctx := context.Background()
 	seedPreloadAuthor(t, db, "a1", "Ada")
-	if _, err := c.CreateMany(ctx, []preloadPost{
+	if _, err := c.CreateManyFormat(ctx, []preloadPost{
 		{ID: "p1", Title: "One", AuthorID: "a1"},
 		{ID: "p2", Title: "Two", AuthorID: "a1"},
 	}); err != nil {
 		t.Fatalf("seed CreateMany returned error: %v", err)
 	}
 
-	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, preloadPostResource, any, string]{
+	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, any, string]{
 		ReadSQLService: &fakeSQLService{db: db},
-		ToResource:     preloadPostToResource,
 	})
 
 	result, err := pc.Pagination(ctx, domains.Pagination{
@@ -218,7 +215,9 @@ func TestPagination_HappyPath_PreloadIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Pagination returned error: %v", err)
 	}
-	if len(result.Data) != 2 || result.Data[0].AuthorName != "Ada" || result.Data[1].AuthorName != "Ada" {
+	if len(result.Data) != 2 ||
+		result.Data[0].Author == nil || result.Data[0].Author.Name != "Ada" ||
+		result.Data[1].Author == nil || result.Data[1].Author.Name != "Ada" {
 		t.Fatalf("expected both rows to have Author preloaded, got %+v, %+v", result.Data[0], result.Data[1])
 	}
 }
@@ -234,14 +233,24 @@ func TestPagination_SadPath_UnknownSortFieldReturnsError(t *testing.T) {
 	}
 }
 
-func TestPagination_SadPath_UnknownFilterFieldReturnsError(t *testing.T) {
+// TestPagination_SadPath_UnknownFilterFieldIsDroppedNotAnError documents the
+// current, deliberate behavior: normalizeFilters treats an unknown filter
+// field as untrusted client input to ignore, not a request to reject — it's
+// dropped (with a Warn, see TestPagination_HappyPath_UnknownFilterFieldLogsAWarnWhenDropped)
+// and the rest of the request proceeds as if that term was never sent.
+func TestPagination_SadPath_UnknownFilterFieldIsDroppedNotAnError(t *testing.T) {
 	t.Parallel()
-	c, _ := newPaginationQueryTestCQRS(t)
-	_, err := c.Pagination(context.Background(), domains.Pagination{
+	c, read := newPaginationQueryTestCQRS(t)
+	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha"}, widget{ID: "w2", Name: "Beta"})
+
+	result, err := c.Pagination(context.Background(), domains.Pagination{
 		Filter: domains.StructuredFilter{Filters: []domains.Filter{{Field: "not_a_real_column", Mode: domains.ModeEqual, Value: "x"}}},
 	})
-	if err == nil {
-		t.Fatal("expected an error for an unknown filter field, got nil")
+	if err != nil {
+		t.Fatalf("expected the unknown filter field to be dropped rather than error, got: %v", err)
+	}
+	if len(result.Data) != 2 {
+		t.Fatalf("expected both rows back (unknown filter ignored), got %+v", result.Data)
 	}
 }
 
@@ -252,8 +261,7 @@ func TestPagination_SadPath_NewPaginationServicePanicsWhenReadSQLServiceIsNil(t 
 			t.Fatal("expected NewPaginationService to panic when ReadSQLService is nil, got no panic")
 		}
 	}()
-	pagination.NewPaginationService(pagination.PaginationService[widget, widgetResource, any, string]{
-		ToResource: widgetToResource,
+	pagination.NewPaginationService(pagination.PaginationService[widget, any, string]{
 		// ReadSQLService deliberately left nil.
 	})
 }
@@ -402,19 +410,29 @@ func TestPagination_HappyPath_LogicOrCombinesMultipleFilters(t *testing.T) {
 	}
 }
 
-func TestPagination_SadPath_LaterFilterFieldStillValidatedAfterAnEarlierError(t *testing.T) {
+// TestPagination_HappyPath_UnknownMiddleFilterFieldIsDroppedOthersStillApply
+// confirms normalizeFilters drops exactly the one bad term (regardless of
+// its position in the slice) while the surrounding valid filters still
+// combine normally.
+func TestPagination_HappyPath_UnknownMiddleFilterFieldIsDroppedOthersStillApply(t *testing.T) {
 	t.Parallel()
 	c, read := newPaginationQueryTestCQRS(t)
-	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha", Priority: new(1)})
-	_, err := c.Pagination(context.Background(), domains.Pagination{
+	seedWidgets(t, read,
+		widget{ID: "w1", Name: "Alpha", Priority: new(1)},
+		widget{ID: "w2", Name: "Alpha", Priority: new(2)},
+	)
+	result, err := c.Pagination(context.Background(), domains.Pagination{
 		Filter: domains.StructuredFilter{Filters: []domains.Filter{
 			{Field: "name", Mode: domains.ModeEqual, Value: "Alpha"},
 			{Field: "not_a_real_column", Mode: domains.ModeEqual, Value: "x"},
 			{Field: "priority", Mode: domains.ModeEqual, Value: 1},
 		}},
 	})
-	if err == nil {
-		t.Fatal("expected an error for the unknown middle filter field, got nil")
+	if err != nil {
+		t.Fatalf("expected the unknown middle filter to be dropped rather than error, got: %v", err)
+	}
+	if len(result.Data) != 1 || result.Data[0].ID != "w1" {
+		t.Fatalf("expected only [w1] (name=Alpha AND priority=1 survives), got %+v", result.Data)
 	}
 }
 
@@ -439,9 +457,8 @@ func TestPagination_PoisonPill_InvalidExplicitSortOrderNormalizesToAscending(t *
 func TestPagination_HappyPath_ColumnDefaultSortAscendingIsUsedWhenNoSortFieldsGiven(t *testing.T) {
 	t.Parallel()
 	read := newFakeSQLService(t)
-	c := pagination.NewPaginationService(pagination.PaginationService[widget, widgetResource, any, string]{
+	c := pagination.NewPaginationService(pagination.PaginationService[widget, any, string]{
 		ReadSQLService:    read,
-		ToResource:        widgetToResource,
 		ColumnDefaultSort: "priority asc",
 	})
 	seedWidgets(t, read,
@@ -496,13 +513,12 @@ func TestPagination_SadPath_UnknownPreloadRelationReturnsError(t *testing.T) {
 	c, db := newPreloadTestCQRS(t)
 	ctx := context.Background()
 	seedPreloadAuthor(t, db, "a1", "Ada")
-	if _, err := c.CreateMany(ctx, []preloadPost{{ID: "p1", Title: "One", AuthorID: "a1"}}); err != nil {
+	if _, err := c.CreateManyFormat(ctx, []preloadPost{{ID: "p1", Title: "One", AuthorID: "a1"}}); err != nil {
 		t.Fatalf("seed CreateMany returned error: %v", err)
 	}
 
-	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, preloadPostResource, any, string]{
+	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, any, string]{
 		ReadSQLService: &fakeSQLService{db: db},
-		ToResource:     preloadPostToResource,
 	})
 
 	_, err := pc.Pagination(ctx, domains.Pagination{}, "NotARealRelation")
@@ -747,7 +763,7 @@ func TestPagination_HappyPath_BackwardDirectionWithMixedDirectionSort(t *testing
 	}
 }
 
-func TestPagination_SadPath_UnknownFilterFieldWithMixedDirectionSortReturnsError(t *testing.T) {
+func TestPagination_HappyPath_UnknownFilterFieldWithMixedDirectionSortIsDroppedNotAnError(t *testing.T) {
 	t.Parallel()
 	c, read := newPaginationQueryTestCQRS(t)
 	ctx := context.Background()
@@ -764,7 +780,7 @@ func TestPagination_SadPath_UnknownFilterFieldWithMixedDirectionSortReturnsError
 		t.Fatalf("page1 error: %v", err)
 	}
 
-	_, err = c.Pagination(ctx, domains.Pagination{
+	page2, err := c.Pagination(ctx, domains.Pagination{
 		Filter: domains.StructuredFilter{
 			SortFields: sortFields,
 			Filters:    []domains.Filter{{Field: "not_a_real_column", Mode: domains.ModeEqual, Value: "x"}},
@@ -772,8 +788,11 @@ func TestPagination_SadPath_UnknownFilterFieldWithMixedDirectionSortReturnsError
 		PageSize: 1,
 		Cursor:   page1.NextCursor,
 	})
-	if err == nil {
-		t.Fatal("expected an error for an unknown filter field on the mixed-direction path, got nil")
+	if err != nil {
+		t.Fatalf("expected the unknown filter field to be dropped rather than error on the mixed-direction path, got: %v", err)
+	}
+	if len(page2.Data) != 1 {
+		t.Fatalf("expected page2 to still return a row (unknown filter ignored), got %+v", page2.Data)
 	}
 }
 
@@ -969,13 +988,12 @@ func TestPagination_HappyPath_PreloadAppliesOnEveryPageOfAMultiPageWalk(t *testi
 	for i := range posts {
 		posts[i] = preloadPost{ID: fmt.Sprintf("p%d", i), Title: fmt.Sprintf("Post %d", i), AuthorID: "a1"}
 	}
-	if _, err := c.CreateMany(ctx, posts); err != nil {
+	if _, err := c.CreateManyFormat(ctx, posts); err != nil {
 		t.Fatalf("seed CreateMany returned error: %v", err)
 	}
 
-	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, preloadPostResource, any, string]{
+	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, any, string]{
 		ReadSQLService: &fakeSQLService{db: db},
-		ToResource:     preloadPostToResource,
 	})
 
 	var cursor *string
@@ -991,8 +1009,8 @@ func TestPagination_HappyPath_PreloadAppliesOnEveryPageOfAMultiPageWalk(t *testi
 		}
 		pages++
 		for _, r := range result.Data {
-			if r.AuthorName != "Ada" {
-				t.Errorf("page %d: expected AuthorName 'Ada' on every row, got %q for %s", pages, r.AuthorName, r.ID)
+			if r.Author == nil || r.Author.Name != "Ada" {
+				t.Errorf("page %d: expected Author.Name 'Ada' on every row, got %+v for %s", pages, r.Author, r.ID)
 			}
 		}
 		if result.NextCursor == nil {

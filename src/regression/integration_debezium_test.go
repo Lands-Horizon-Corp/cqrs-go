@@ -127,7 +127,7 @@ func TestIntegration_HappyPath_RealDebeziumThroughBridgeAlignsRealPostgresRead(t
 	// captures it, exactly as it would in production.
 	id := fmt.Sprintf("bridge-%d", time.Now().UnixNano())
 	w := widget{ID: id, Name: "real-debezium-gadget", Active: true, Priority: new(7)}
-	if _, err := c.Create(context.Background(), w); err != nil {
+	if _, err := c.CreateFormat(context.Background(), w); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 

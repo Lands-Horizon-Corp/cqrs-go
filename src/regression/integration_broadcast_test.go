@@ -30,7 +30,7 @@ func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Created(t *te
 	go func() { done <- c.Run(ctx) }()
 
 	w := widget{ID: "w1", Name: "gadget", Active: true}
-	if _, err := c.Create(ctx, w); err != nil {
+	if _, err := c.CreateFormat(ctx, w); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 	envelope, err := sonic.Marshal(domains.CQRSQueuePayload[widget]{
@@ -74,7 +74,7 @@ func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Updated(t *te
 	go func() { done <- c.Run(ctx) }()
 
 	seed := widget{ID: "w1", Name: "old"}
-	if _, err := c.Create(ctx, seed); err != nil {
+	if _, err := c.CreateFormat(ctx, seed); err != nil {
 		t.Fatalf("seed Create returned error: %v", err)
 	}
 	seedEnvelope, err := sonic.Marshal(domains.CQRSQueuePayload[widget]{
@@ -89,7 +89,7 @@ func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Updated(t *te
 	sub.waitForEvent(t, "widget.created", 15*time.Second) // drain the seed broadcast
 
 	updated := widget{ID: "w1", Name: "new"}
-	if _, err := c.UpdateByID(ctx, "w1", updated); err != nil {
+	if _, err := c.UpdateByIDFormat(ctx, "w1", updated); err != nil {
 		t.Fatalf("UpdateByID returned error: %v", err)
 	}
 	updateEnvelope, err := sonic.Marshal(domains.CQRSQueuePayload[widget]{
@@ -130,7 +130,7 @@ func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Deleted(t *te
 	go func() { done <- c.Run(ctx) }()
 
 	seed := widget{ID: "w1", Name: "n"}
-	if _, err := c.Create(ctx, seed); err != nil {
+	if _, err := c.CreateFormat(ctx, seed); err != nil {
 		t.Fatalf("seed Create returned error: %v", err)
 	}
 	seedEnvelope, err := sonic.Marshal(domains.CQRSQueuePayload[widget]{

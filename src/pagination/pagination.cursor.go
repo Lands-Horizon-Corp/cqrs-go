@@ -30,7 +30,7 @@ type cursorPayload struct {
 // defaults to ColumnDefaultSort when none are given, and guarantees
 // ColumnDefaultID is present as the final column so the keyset comparison
 // tuple is always strictly unique and ordered.
-func (c *PaginationService[TData, TResponse, TRequest, TID]) resolveSortFields(
+func (c *PaginationService[TData, TRequest, TID]) resolveSortFields(
 	sortFields []domains.SortField,
 ) ([]domains.SortField, error) {
 	resolved := make([]domains.SortField, 0, len(sortFields)+1)
@@ -59,7 +59,7 @@ func (c *PaginationService[TData, TResponse, TRequest, TID]) resolveSortFields(
 // caller-supplied sort fields are: ColumnDefaultID/ColumnDefaultSort are
 // operator configuration, not client input, and a misconfigured value here
 // is a setup bug that surfaces immediately as a Postgres error.
-func (c *PaginationService[TData, TResponse, TRequest, TID]) defaultSortField() domains.SortField {
+func (c *PaginationService[TData, TRequest, TID]) defaultSortField() domains.SortField {
 	sf := domains.SortField{Field: c.ColumnDefaultID, Order: domains.SortOrderDesc}
 	parts := strings.Fields(c.ColumnDefaultSort)
 	if len(parts) == 0 {
@@ -76,7 +76,7 @@ func (c *PaginationService[TData, TResponse, TRequest, TID]) defaultSortField() 
 // pagination scan starting from data — the sort-key tuple of that row, plus
 // backward stamped into the token so a later call knows how to interpret it
 // without the caller having to also track/send a direction.
-func (c *PaginationService[TData, TResponse, TRequest, TID]) encodeCursor(
+func (c *PaginationService[TData, TRequest, TID]) encodeCursor(
 	data *TData, sortFields []domains.SortField, backward bool,
 ) (string, error) {
 	values := make([]string, len(sortFields))
@@ -91,7 +91,7 @@ func (c *PaginationService[TData, TResponse, TRequest, TID]) encodeCursor(
 // zero-value payload with ok=false, meaning "first page, no keyset
 // condition at all" — that's never a backward request, since Backward only
 // ever comes from an actual token a previous page produced.
-func (c *PaginationService[TData, TResponse, TRequest, TID]) decodeCursor(
+func (c *PaginationService[TData, TRequest, TID]) decodeCursor(
 	cursor *string, sortFields []domains.SortField,
 ) (payload cursorPayload, ok bool, err error) {
 	if cursor == nil || *cursor == "" {

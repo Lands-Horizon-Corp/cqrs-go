@@ -42,11 +42,11 @@ import (
 //     instead of an OR/AND WHERE clause, which Postgres never turns into an
 //     index condition no matter how it's phrased — confirmed directly
 //     against a real Postgres instance before choosing this approach.
-func (c *PaginationService[TData, TResponse, TRequest, TID]) Pagination(
+func (c *PaginationService[TData, TRequest, TID]) Pagination(
 	ctx context.Context,
 	pagination domains.Pagination,
 	preloads ...string,
-) (*domains.PaginationResult[TResponse], error) {
+) (*domains.PaginationResult[TData], error) {
 	if err := c.checkReady(); err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func (c *PaginationService[TData, TResponse, TRequest, TID]) Pagination(
 // bypassing NewPaginationService (whose own nil-check only guards
 // ReadSQLService) could otherwise reach paginate with an empty
 // ColumnDefaultID and get a broken query instead of a clear error.
-func (c *PaginationService[TData, TResponse, TRequest, TID]) checkReady() error {
+func (c *PaginationService[TData, TRequest, TID]) checkReady() error {
 	if c.ReadSQLService == nil {
 		return fmt.Errorf("pagination requires ReadSQLService to be set")
 	}
@@ -81,12 +81,12 @@ func (c *PaginationService[TData, TResponse, TRequest, TID]) checkReady() error 
 // *bun.Tx (e.g. reading back rows written earlier in the same transaction,
 // before it commits) instead of a separate connection that wouldn't see
 // them yet.
-func (c *PaginationService[TData, TResponse, TRequest, TID]) paginate(
+func (c *PaginationService[TData, TRequest, TID]) paginate(
 	ctx context.Context,
 	db bun.IDB,
 	pagination domains.Pagination,
 	preloads ...string,
-) (*domains.PaginationResult[TResponse], error) {
+) (*domains.PaginationResult[TData], error) {
 	if pagination.PageSize <= 0 {
 		pagination.PageSize = 30
 	} else if pagination.PageSize > math.MaxInt-1 {
@@ -100,6 +100,8 @@ func (c *PaginationService[TData, TResponse, TRequest, TID]) paginate(
 		// why this only surfaced by testing the real target database).
 		pagination.PageSize = math.MaxInt - 1
 	}
+
+	pagination.Filter.Filters = c.normalizeFilters(ctx, pagination.Filter.Filters)
 
 	sortFields, err := c.resolveSortFields(pagination.Filter.SortFields)
 	if err != nil {
@@ -160,7 +162,7 @@ func (c *PaginationService[TData, TResponse, TRequest, TID]) paginate(
 		return nil, fmt.Errorf("loading preloads: %w", err)
 	}
 
-	result := &domains.PaginationResult[TResponse]{
+	result := &domains.PaginationResult[TData]{
 		PageSize:      pagination.PageSize,
 		CurrentCursor: pagination.Cursor,
 	}
@@ -203,13 +205,9 @@ func (c *PaginationService[TData, TResponse, TRequest, TID]) paginate(
 		}
 	}
 
-	if c.ToResource != nil {
-		result.Data = make([]*TResponse, 0, len(data))
-		for i := range data {
-			if res := c.ToResource(&data[i]); res != nil {
-				result.Data = append(result.Data, res)
-			}
-		}
+	result.Data = make([]*TData, len(data))
+	for i := range data {
+		result.Data[i] = &data[i]
 	}
 	return result, nil
 }

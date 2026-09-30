@@ -49,10 +49,10 @@ func TestNilPointer_CreateUpdateDelete_AllFieldsNilNeverPanics(t *testing.T) {
 	c, _ := newTestCQRS(t)
 	ctx := context.Background()
 
-	if _, err := c.Create(ctx, widget{ID: "w1", Name: "n"}); err != nil {
+	if _, err := c.CreateFormat(ctx, widget{ID: "w1", Name: "n"}); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
-	if _, err := c.UpdateByID(ctx, "w1", widget{ID: "w1", Name: "n2"}); err != nil {
+	if _, err := c.UpdateByIDFormat(ctx, "w1", widget{ID: "w1", Name: "n2"}); err != nil {
 		t.Fatalf("UpdateByID returned error: %v", err)
 	}
 	if err := c.DeleteByID(ctx, "w1"); err != nil {
@@ -72,10 +72,10 @@ func TestNilPointer_CreateUpdateDelete_AllFieldsSetNeverPanics(t *testing.T) {
 		ID: "w1", Name: "n", Active: true,
 		Featured: new(true), Notes: new("n"), Priority: new(1), ExpiresAt: &exp,
 	}
-	if _, err := c.Create(ctx, full); err != nil {
+	if _, err := c.CreateFormat(ctx, full); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
-	if _, err := c.UpdateByID(ctx, "w1", full); err != nil {
+	if _, err := c.UpdateByIDFormat(ctx, "w1", full); err != nil {
 		t.Fatalf("UpdateByID returned error: %v", err)
 	}
 	if err := c.DeleteByID(ctx, "w1"); err != nil {
@@ -140,7 +140,7 @@ func TestNilPointer_NilSlicesAndDispatchNeverPanic(t *testing.T) {
 	c := cqrsWithNilEventsCallback(t, write)
 
 	ctx := context.Background()
-	if _, err := c.Create(ctx, widget{ID: "w1", Name: "n"}); err != nil {
+	if _, err := c.CreateFormat(ctx, widget{ID: "w1", Name: "n"}); err != nil {
 		t.Fatalf("Create returned error: %v", err)
 	}
 	// OnCreated is not wired through Run() here, so call it directly to

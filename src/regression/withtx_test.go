@@ -24,7 +24,7 @@ func TestCreateWithTx_HappyPath_InsertsWithinTransaction(t *testing.T) {
 	c, write := newTestCQRS(t)
 
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
-		res, err := c.CreateWithTx(ctx, tx, widget{ID: "w1", Name: "n"})
+		res, err := c.CreateWithTxFormat(ctx, tx, widget{ID: "w1", Name: "n"})
 		if err != nil {
 			return err
 		}
@@ -39,12 +39,37 @@ func TestCreateWithTx_HappyPath_InsertsWithinTransaction(t *testing.T) {
 	}
 }
 
+// TestCreateWithTx_HappyPath_ReturnsTDataDirectlyNotResource pins
+// CreateWithTx's return type at *widget (TData) via the `var _ *widget = res`
+// compile-time check, distinguishing it from CreateWithTxFormat which
+// converts through ToResource.
+func TestCreateWithTx_HappyPath_ReturnsTDataDirectlyNotResource(t *testing.T) {
+	t.Parallel()
+	c, write := newTestCQRS(t)
+
+	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
+		res, err := c.CreateWithTx(ctx, tx, widget{ID: "w1", Name: "n"})
+		if err != nil {
+			return err
+		}
+		var _ *widget = res
+		if res == nil || res.ID != "w1" {
+			t.Fatalf("unexpected TData: %+v", res)
+		}
+		return nil
+	})
+
+	if _, ok := readWidgetFrom(t, write, "w1"); !ok {
+		t.Fatal("expected row to exist after commit")
+	}
+}
+
 func TestCreateWithTx_SadPath_ValidationFailureBlocksInsert(t *testing.T) {
 	t.Parallel()
 	c, write := newTestCQRS(t)
 
 	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
-		_, err := c.CreateWithTx(ctx, tx, widget{ID: "w1"}) // Name required
+		_, err := c.CreateWithTxFormat(ctx, tx, widget{ID: "w1"}) // Name required
 		return err
 	})
 	if err == nil {
@@ -61,7 +86,7 @@ func TestCreateWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
 	dropWidgetsTable(t, write)
 
 	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
-		_, err := c.CreateWithTx(ctx, tx, widget{ID: "w1", Name: "n"})
+		_, err := c.CreateWithTxFormat(ctx, tx, widget{ID: "w1", Name: "n"})
 		return err
 	})
 	if err == nil {
@@ -75,7 +100,7 @@ func TestCreateWithTx_HappyPath_NilToResourceReturnsNilWithoutError(t *testing.T
 	c := newCQRSNoResource(t, write)
 
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
-		res, err := c.CreateWithTx(ctx, tx, widget{ID: "w1", Name: "n"})
+		res, err := c.CreateWithTxFormat(ctx, tx, widget{ID: "w1", Name: "n"})
 		if err != nil {
 			return err
 		}
@@ -91,7 +116,7 @@ func TestCreateManyWithTx_HappyPath_InsertsAllWithinTransaction(t *testing.T) {
 	c, write := newTestCQRS(t)
 
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
-		res, err := c.CreateManyWithTx(ctx, tx, []widget{{ID: "a", Name: "n"}, {ID: "b", Name: "n"}})
+		res, err := c.CreateManyWithTxFormat(ctx, tx, []widget{{ID: "a", Name: "n"}, {ID: "b", Name: "n"}})
 		if err != nil {
 			return err
 		}
@@ -110,11 +135,28 @@ func TestCreateManyWithTx_HappyPath_InsertsAllWithinTransaction(t *testing.T) {
 	}
 }
 
+func TestCreateManyWithTx_HappyPath_ReturnsTDataDirectlyNotResource(t *testing.T) {
+	t.Parallel()
+	c, write := newTestCQRS(t)
+
+	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
+		res, err := c.CreateManyWithTx(ctx, tx, []widget{{ID: "a", Name: "one"}, {ID: "b", Name: "two"}})
+		if err != nil {
+			return err
+		}
+		var _ []*widget = res
+		if len(res) != 2 || res[0].Name != "one" || res[1].Name != "two" {
+			t.Fatalf("unexpected TData slice: %+v", res)
+		}
+		return nil
+	})
+}
+
 func TestCreateManyWithTx_SadPath_EmptyInputIsANoOp(t *testing.T) {
 	t.Parallel()
 	c, write := newTestCQRS(t)
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
-		res, err := c.CreateManyWithTx(ctx, tx, nil)
+		res, err := c.CreateManyWithTxFormat(ctx, tx, nil)
 		if err != nil {
 			t.Fatalf("expected no error for empty input, got %v", err)
 		}
@@ -129,7 +171,7 @@ func TestCreateManyWithTx_SadPath_ValidationFailureBlocksWholeBatch(t *testing.T
 	t.Parallel()
 	c, write := newTestCQRS(t)
 	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
-		_, err := c.CreateManyWithTx(ctx, tx, []widget{{ID: "a", Name: "ok"}, {ID: "b", Name: ""}})
+		_, err := c.CreateManyWithTxFormat(ctx, tx, []widget{{ID: "a", Name: "ok"}, {ID: "b", Name: ""}})
 		return err
 	})
 	if err == nil {
@@ -141,7 +183,7 @@ func TestCreateManyWithTx_SadPath_DBErrorOnDuplicateID(t *testing.T) {
 	t.Parallel()
 	c, write := newTestCQRS(t)
 	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
-		_, err := c.CreateManyWithTx(ctx, tx, []widget{{ID: "dup", Name: "one"}, {ID: "dup", Name: "two"}})
+		_, err := c.CreateManyWithTxFormat(ctx, tx, []widget{{ID: "dup", Name: "one"}, {ID: "dup", Name: "two"}})
 		return err
 	})
 	if err == nil {
@@ -155,7 +197,7 @@ func TestCreateManyWithTx_HappyPath_NilToResourceReturnsNilResponses(t *testing.
 	c := newCQRSNoResource(t, write)
 
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
-		res, err := c.CreateManyWithTx(ctx, tx, []widget{{ID: "a", Name: "n"}})
+		res, err := c.CreateManyWithTxFormat(ctx, tx, []widget{{ID: "a", Name: "n"}})
 		if err != nil {
 			return err
 		}
@@ -172,7 +214,7 @@ func TestUpdateByIDWithTx_HappyPath_ChangesPersist(t *testing.T) {
 	seedWidget(t, c, widget{ID: "w1", Name: "old"})
 
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
-		res, err := c.UpdateByIDWithTx(ctx, tx, "w1", widget{ID: "w1", Name: "new"})
+		res, err := c.UpdateByIDWithTxFormat(ctx, tx, "w1", widget{ID: "w1", Name: "new"})
 		if err != nil {
 			return err
 		}
@@ -187,11 +229,29 @@ func TestUpdateByIDWithTx_HappyPath_ChangesPersist(t *testing.T) {
 	}
 }
 
+func TestUpdateByIDWithTx_HappyPath_ReturnsTDataDirectlyNotResource(t *testing.T) {
+	t.Parallel()
+	c, write := newTestCQRS(t)
+	seedWidget(t, c, widget{ID: "w1", Name: "old"})
+
+	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
+		res, err := c.UpdateByIDWithTx(ctx, tx, "w1", widget{ID: "w1", Name: "new"})
+		if err != nil {
+			return err
+		}
+		var _ *widget = res
+		if res.Name != "new" {
+			t.Fatalf("unexpected TData name: %q", res.Name)
+		}
+		return nil
+	})
+}
+
 func TestUpdateByIDWithTx_SadPath_NonexistentIDReturnsErrNoRows(t *testing.T) {
 	t.Parallel()
 	c, write := newTestCQRS(t)
 	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
-		_, err := c.UpdateByIDWithTx(ctx, tx, "missing", widget{ID: "missing", Name: "n"})
+		_, err := c.UpdateByIDWithTxFormat(ctx, tx, "missing", widget{ID: "missing", Name: "n"})
 		return err
 	})
 	if err == nil {
@@ -205,7 +265,7 @@ func TestUpdateByIDWithTx_SadPath_ValidationFailureBlocksUpdate(t *testing.T) {
 	seedWidget(t, c, widget{ID: "w1", Name: "original"})
 
 	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
-		_, err := c.UpdateByIDWithTx(ctx, tx, "w1", widget{ID: "w1", Name: ""})
+		_, err := c.UpdateByIDWithTxFormat(ctx, tx, "w1", widget{ID: "w1", Name: ""})
 		return err
 	})
 	if err == nil {
@@ -223,7 +283,7 @@ func TestUpdateByIDWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
 	dropWidgetsTable(t, write)
 
 	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
-		_, err := c.UpdateByIDWithTx(ctx, tx, "w1", widget{ID: "w1", Name: "n2"})
+		_, err := c.UpdateByIDWithTxFormat(ctx, tx, "w1", widget{ID: "w1", Name: "n2"})
 		return err
 	})
 	if err == nil {
@@ -238,7 +298,7 @@ func TestUpdateByIDWithTx_HappyPath_NilToResourceReturnsNilWithoutError(t *testi
 	seedWidget(t, c, widget{ID: "w1", Name: "n"})
 
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
-		res, err := c.UpdateByIDWithTx(ctx, tx, "w1", widget{ID: "w1", Name: "n2"})
+		res, err := c.UpdateByIDWithTxFormat(ctx, tx, "w1", widget{ID: "w1", Name: "n2"})
 		if err != nil {
 			return err
 		}
@@ -344,7 +404,7 @@ func TestUpdateManyWithTx_HappyPath_UpdatesAllRowsWithinTransaction(t *testing.T
 	seedWidget(t, c, widget{ID: "b", Name: "old-b"})
 
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
-		res, err := c.UpdateManyWithTx(ctx, tx, []widget{
+		res, err := c.UpdateManyWithTxFormat(ctx, tx, []widget{
 			{ID: "a", Name: "new-a"},
 			{ID: "b", Name: "new-b"},
 		})
@@ -364,11 +424,33 @@ func TestUpdateManyWithTx_HappyPath_UpdatesAllRowsWithinTransaction(t *testing.T
 	}
 }
 
+func TestUpdateManyWithTx_HappyPath_ReturnsTDataDirectlyNotResource(t *testing.T) {
+	t.Parallel()
+	c, write := newTestCQRS(t)
+	seedWidget(t, c, widget{ID: "a", Name: "old-a"})
+	seedWidget(t, c, widget{ID: "b", Name: "old-b"})
+
+	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
+		res, err := c.UpdateManyWithTx(ctx, tx, []widget{
+			{ID: "a", Name: "new-a"},
+			{ID: "b", Name: "new-b"},
+		})
+		if err != nil {
+			return err
+		}
+		var _ []*widget = res
+		if len(res) != 2 || res[0].Name != "new-a" || res[1].Name != "new-b" {
+			t.Fatalf("unexpected TData slice: %+v", res)
+		}
+		return nil
+	})
+}
+
 func TestUpdateManyWithTx_SadPath_EmptyInputIsANoOp(t *testing.T) {
 	t.Parallel()
 	c, write := newTestCQRS(t)
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
-		res, err := c.UpdateManyWithTx(ctx, tx, nil)
+		res, err := c.UpdateManyWithTxFormat(ctx, tx, nil)
 		if err != nil {
 			t.Fatalf("expected no error for empty input, got %v", err)
 		}
@@ -386,7 +468,7 @@ func TestUpdateManyWithTx_SadPath_DBErrorIsWrapped(t *testing.T) {
 	dropWidgetsTable(t, write)
 
 	err := write.db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
-		_, err := c.UpdateManyWithTx(ctx, tx, []widget{{ID: "a", Name: "n2"}})
+		_, err := c.UpdateManyWithTxFormat(ctx, tx, []widget{{ID: "a", Name: "n2"}})
 		return err
 	})
 	if err == nil {
@@ -401,7 +483,7 @@ func TestUpdateManyWithTx_HappyPath_NilToResourceReturnsNilResponses(t *testing.
 	seedWidget(t, c, widget{ID: "a", Name: "old"})
 
 	withTx(t, write, func(ctx context.Context, tx bun.Tx) error {
-		res, err := c.UpdateManyWithTx(ctx, tx, []widget{{ID: "a", Name: "new"}})
+		res, err := c.UpdateManyWithTxFormat(ctx, tx, []widget{{ID: "a", Name: "new"}})
 		if err != nil {
 			return err
 		}
