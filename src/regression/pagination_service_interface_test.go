@@ -136,7 +136,11 @@ func TestPagination_HappyPath_PaginateFilterCombinesFiltersOnMixedDirectionPath(
 	}
 }
 
-func TestPagination_HappyPath_FilterUsesDefaultPagination(t *testing.T) {
+// TestPagination_HappyPath_FilterReturnsRawTDataNotAPaginationResult
+// confirms Filter drops the PaginationResult wrapper entirely (no
+// cursor/page-size metadata to expose — there's no way to ask this method
+// for a second page anyway) and returns just the matched rows.
+func TestPagination_HappyPath_FilterReturnsRawTDataNotAPaginationResult(t *testing.T) {
 	t.Parallel()
 	c, read := asPaginationServiceInterface(t)
 	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha"}, widget{ID: "w2", Name: "Beta"})
@@ -147,11 +151,9 @@ func TestPagination_HappyPath_FilterUsesDefaultPagination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Filter returned error: %v", err)
 	}
-	if len(result.Data) != 1 || result.Data[0].ID != "w1" {
-		t.Fatalf("expected [w1], got %+v", result.Data)
-	}
-	if result.PageSize != 30 {
-		t.Fatalf("expected Filter to fall back to the default PageSize 30, got %d", result.PageSize)
+	var _ []*widget = result
+	if len(result) != 1 || result[0].ID != "w1" {
+		t.Fatalf("expected [w1], got %+v", result)
 	}
 }
 
@@ -180,8 +182,8 @@ func TestPagination_HappyPath_FilterWithTxSeesUncommittedWritesInTheSameTx(t *te
 	if err != nil {
 		t.Fatalf("FilterWithTx returned error: %v", err)
 	}
-	if len(inTx.Data) != 1 || inTx.Data[0].ID != "w1" {
-		t.Fatalf("expected FilterWithTx to see the uncommitted row, got %+v", inTx.Data)
+	if len(inTx) != 1 || inTx[0].ID != "w1" {
+		t.Fatalf("expected FilterWithTx to see the uncommitted row, got %+v", inTx)
 	}
 
 	if err := tx.Rollback(); err != nil {
@@ -194,8 +196,8 @@ func TestPagination_HappyPath_FilterWithTxSeesUncommittedWritesInTheSameTx(t *te
 	if err != nil {
 		t.Fatalf("Filter (after rollback) returned error: %v", err)
 	}
-	if len(after.Data) != 0 {
-		t.Fatalf("expected the rolled-back row to be gone, got %+v", after.Data)
+	if len(after) != 0 {
+		t.Fatalf("expected the rolled-back row to be gone, got %+v", after)
 	}
 }
 

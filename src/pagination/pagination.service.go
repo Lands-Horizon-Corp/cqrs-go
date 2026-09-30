@@ -43,29 +43,38 @@ func (c *PaginationService[TData, TID]) PaginateFilter(
 }
 
 // Filter is PaginateFilter against a zero-value domains.Pagination (default
-// page size, no cursor, no frontend-supplied filter) — a convenience for
-// callers that only need the first page of a filter-only result.
+// page size, no cursor, no frontend-supplied filter), returning just the
+// matched rows rather than a full PaginationResult — a convenience for
+// callers that only need a one-shot filtered lookup, not real pagination:
+// there's no cursor exposed here to request a second page with anyway, so
+// wrapping the result in cursor/page-size metadata nobody can act on would
+// be misleading.
 func (c *PaginationService[TData, TID]) Filter(
 	ctx context.Context, filter domains.StructuredFilter,
-) (domains.PaginationResult[TData], error) {
-	return c.PaginateFilter(ctx, filter, domains.Pagination{})
+) ([]*TData, error) {
+	result, err := c.PaginateFilter(ctx, filter, domains.Pagination{})
+	if err != nil {
+		return nil, err
+	}
+	return result.Data, nil
 }
 
 // FilterWithTx is Filter run against a caller-supplied *bun.Tx instead of
 // ReadSQLService's own client — e.g. reading back rows written earlier in
 // the same transaction, before it commits and becomes visible through a
 // separate connection. It's just a filter, the same way Filter is — no
-// pagination parameter, since a transactional read-your-writes lookup like
-// this has no frontend request behind it to carry page size/cursor for.
+// pagination parameter and no PaginationResult wrapper, since a
+// transactional read-your-writes lookup like this has no frontend request
+// behind it to carry page size/cursor for.
 func (c *PaginationService[TData, TID]) FilterWithTx(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter,
-) (domains.PaginationResult[TData], error) {
+) ([]*TData, error) {
 	if err := c.checkReady(); err != nil {
-		return domains.PaginationResult[TData]{}, err
+		return nil, err
 	}
 	result, err := c.paginate(ctx, tx, filter, domains.Pagination{})
 	if err != nil {
-		return domains.PaginationResult[TData]{}, err
+		return nil, err
 	}
-	return *result, nil
+	return result.Data, nil
 }

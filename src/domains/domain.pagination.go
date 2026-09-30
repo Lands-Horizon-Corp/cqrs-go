@@ -17,25 +17,18 @@ const (
 	ModeNotContains Mode = "notContains"
 	ModeStartsWith  Mode = "startsWith"
 	ModeEndsWith    Mode = "endsWith"
-	// ModeSearch is BM25 full-text search via ParadeDB's pg_search
-	// extension (the @@@ operator) rather than a LIKE scan — Postgres-only,
-	// requires PaginationService.EnableSearchIndex to have been run once
-	// against the target column(s) first. An empty Field means "search
-	// every column EnableSearchIndex indexed" instead of one specific
-	// column; see pagination.applyFilterTerm's doc comment for the exact
-	// query shape each case compiles to.
-	ModeSearch     Mode = "search"
-	ModeInside     Mode = "inside"
-	ModeOutside    Mode = "outside"
-	ModeGT         Mode = "gt"
-	ModeGTE        Mode = "gte"
-	ModeLT         Mode = "lt"
-	ModeLTE        Mode = "lte"
-	ModeRange      Mode = "range"
-	ModeBefore     Mode = "before"
-	ModeAfter      Mode = "after"
-	ModeIsEmpty    Mode = "isEmpty"
-	ModeIsNotEmpty Mode = "isNotEmpty"
+	ModeSearch      Mode = "search"
+	ModeInside      Mode = "inside"
+	ModeOutside     Mode = "outside"
+	ModeGT          Mode = "gt"
+	ModeGTE         Mode = "gte"
+	ModeLT          Mode = "lt"
+	ModeLTE         Mode = "lte"
+	ModeRange       Mode = "range"
+	ModeBefore      Mode = "before"
+	ModeAfter       Mode = "after"
+	ModeIsEmpty     Mode = "isEmpty"
+	ModeIsNotEmpty  Mode = "isNotEmpty"
 
 	DataTypeNumber DataType = "number"
 	DataTypeText   DataType = "text"

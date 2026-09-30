@@ -3,6 +3,8 @@ package cqrs
 import (
 	"context"
 
+	"github.com/uptrace/bun"
+
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
 )
 
@@ -44,4 +46,32 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) PaginateFilterFormat(
 		PreviousCursor: paginationResult.PreviousCursor,
 		PageSize:       paginationResult.PageSize,
 	}, nil
+}
+
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Filter(
+	ctx context.Context, filter domains.StructuredFilter) ([]*TData, error) {
+	return c.paginationService.Filter(ctx, filter)
+}
+
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FilterFormat(
+	ctx context.Context, filter domains.StructuredFilter) ([]*TResponse, error) {
+	data, err := c.paginationService.Filter(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	return c.ToModels(data), nil
+}
+
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FilterWithTx(
+	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter) ([]*TData, error) {
+	return c.paginationService.FilterWithTx(ctx, tx, filter)
+}
+
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FilterWithTxFormat(
+	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter) ([]*TResponse, error) {
+	data, err := c.paginationService.FilterWithTx(ctx, tx, filter)
+	if err != nil {
+		return nil, err
+	}
+	return c.ToModels(data), nil
 }
