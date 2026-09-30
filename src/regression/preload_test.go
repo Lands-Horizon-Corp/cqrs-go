@@ -11,15 +11,6 @@ import (
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/cqrs"
 )
 
-// This file verifies CQRSImpl.Preload actually gets used — not just that
-// Create/Update compile with a new variadic preload parameter. bun's query
-// builder only supports .Relation() on SELECT (verified against bun's own
-// source before wiring this in: InsertQuery/UpdateQuery/DeleteQuery have no
-// such method), so Create/Update issue a deliberate follow-up SELECT,
-// matched by WherePK(), only when a preload list is actually non-empty.
-// widget has no relations defined, so this uses its own small two-table
-// pair rather than extending the shared test entity.
-
 type preloadAuthor struct {
 	bun.BaseModel `bun:"table:preload_authors"`
 	ID            string `bun:"id,pk"`

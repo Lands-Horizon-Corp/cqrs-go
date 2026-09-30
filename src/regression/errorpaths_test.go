@@ -323,11 +323,26 @@ func TestErrorPaths_HandleEvent_DispatchErrorIsLoggedButDoesNotBlockBroadcast(t 
 	c.OnCreated(context.Background(), &widget{ID: "w1", Name: "n"})
 	broadcast.waitForCall(t, 2*time.Second)
 
+	// The Dispatch error is logged via c.error(), which itself hands off to
+	// a separate goroutine (see cqrs.logger.go) rather than writing
+	// synchronously — so it can still be in flight even after
+	// waitForCall's own wait returns, since that only waits for the
+	// (separately, non-blockingly triggered) Broadcast call. Poll instead
+	// of a single immediate check, same reasoning as the batching ticker
+	// test's fix elsewhere in this suite.
 	found := false
-	for _, call := range logs.snapshot() {
-		if call.level == "error" {
-			found = true
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, call := range logs.snapshot() {
+			if call.level == "error" {
+				found = true
+				break
+			}
 		}
+		if found {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	if !found {
 		t.Error("expected the Dispatch error to be logged")

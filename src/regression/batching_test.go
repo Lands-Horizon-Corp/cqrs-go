@@ -182,7 +182,22 @@ func TestBatcher_HappyPath_TickerFlush(t *testing.T) {
 	_ = batcher.Push(ctx, 1)
 	_ = batcher.Push(ctx, 2)
 
-	time.Sleep(80 * time.Millisecond)
+	// Polled with a generous timeout rather than a single fixed sleep just
+	// past the 30ms ticker — under t.Parallel() with many tests competing
+	// for CPU, a fixed ~50ms margin was tight enough to flake on a loaded
+	// machine even though the underlying behavior was never actually wrong
+	// (same reasoning as the fix applied to the default-flush-interval test
+	// elsewhere in this file).
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		got := len(received) > 0
+		mu.Unlock()
+		if got {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	mu.Lock()
 	defer mu.Unlock()

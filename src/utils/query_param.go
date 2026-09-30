@@ -22,3 +22,14 @@ func DecodeQueryParam[T any](raw string) (T, error) {
 	}
 	return value, nil
 }
+
+// EncodeQueryParam is DecodeQueryParam's inverse: JSON-marshal v, base64 it,
+// then URL-escape the result so it round-trips safely as a single query
+// string value.
+func EncodeQueryParam[T any](v T) (string, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "", fmt.Errorf("JSON marshalling failed: %w", err)
+	}
+	return url.QueryEscape(base64.StdEncoding.EncodeToString(raw)), nil
+}

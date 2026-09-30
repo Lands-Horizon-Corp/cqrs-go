@@ -78,11 +78,11 @@ type (
 	}
 
 	PaginationResult[T any] struct {
-		Data      []*T `json:"data"`
-		TotalSize int  `json:"totalSize"`
-		TotalPage int  `json:"totalPage"`
-		PageIndex int  `json:"pageIndex"`
-		PageSize  int  `json:"pageSize"`
+		Data           []*T    `json:"data"`
+		CurrentCursor  *string `json:"currentCursor"`
+		NextCursor     *string `json:"nextCursor"`
+		PreviousCursor *string `json:"previousCursor"`
+		PageSize       int     `json:"pageSize"`
 	}
 )
 
