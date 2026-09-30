@@ -7,8 +7,8 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/Lands-Horizon-Corp/cqrs-go/src/cqrs"
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
+	"github.com/Lands-Horizon-Corp/cqrs-go/src/utils"
 )
 
 // Pagination runs a cursor (keyset) pagination query against ReadSQLService
@@ -42,7 +42,7 @@ import (
 //     instead of an OR/AND WHERE clause, which Postgres never turns into an
 //     index condition no matter how it's phrased — confirmed directly
 //     against a real Postgres instance before choosing this approach.
-func (c *PaginationService[TData, TRequest, TID]) Pagination(
+func (c *PaginationService[TData, TID]) Pagination(
 	ctx context.Context,
 	pagination domains.Pagination,
 	preloads ...string,
@@ -59,7 +59,7 @@ func (c *PaginationService[TData, TRequest, TID]) Pagination(
 // bypassing NewPaginationService (whose own nil-check only guards
 // ReadSQLService) could otherwise reach paginate with an empty
 // ColumnDefaultID and get a broken query instead of a clear error.
-func (c *PaginationService[TData, TRequest, TID]) checkReady() error {
+func (c *PaginationService[TData, TID]) checkReady() error {
 	if c.ReadSQLService == nil {
 		return fmt.Errorf("pagination requires ReadSQLService to be set")
 	}
@@ -81,7 +81,7 @@ func (c *PaginationService[TData, TRequest, TID]) checkReady() error {
 // *bun.Tx (e.g. reading back rows written earlier in the same transaction,
 // before it commits) instead of a separate connection that wouldn't see
 // them yet.
-func (c *PaginationService[TData, TRequest, TID]) paginate(
+func (c *PaginationService[TData, TID]) paginate(
 	ctx context.Context,
 	db bun.IDB,
 	pagination domains.Pagination,
@@ -150,15 +150,12 @@ func (c *PaginationService[TData, TRequest, TID]) paginate(
 		data = data[:pagination.PageSize]
 	}
 	if backward {
-		// data came back in reversed (walked-from-the-other-end) order —
-		// flip it back so Data always reads in the same forward order
-		// regardless of which direction fetched it.
 		for i, j := 0, len(data)-1; i < j; i, j = i+1, j-1 {
 			data[i], data[j] = data[j], data[i]
 		}
 	}
 
-	if err := cqrs.ApplyPreloadsMany(ctx, db, &data, c.Preloads, preloads...); err != nil {
+	if err := utils.ApplyPreloadsMany(ctx, db, &data, c.Preloads, preloads...); err != nil {
 		return nil, fmt.Errorf("loading preloads: %w", err)
 	}
 

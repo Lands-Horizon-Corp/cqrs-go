@@ -53,7 +53,7 @@ import (
 // composite PK won't have. EnablePartitioning is intended for read-side
 // tables populated some other way (a reporting/analytics projection, a
 // batch job, ...), not ones a CDC sync also writes into.
-func (c *PaginationService[TData, TRequest, TID]) EnablePartitioning(
+func (c *PaginationService[TData, TID]) EnablePartitioning(
 	ctx context.Context, control string, interval string,
 ) error {
 	if c.ReadSQLService == nil {

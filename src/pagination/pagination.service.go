@@ -10,7 +10,7 @@ import (
 
 // Paginate is Pagination with no preload relations, returning
 // domains.PaginationResult by value to satisfy the interface's signature.
-func (c *PaginationService[TData, TRequest, TID]) Paginate(
+func (c *PaginationService[TData, TID]) Paginate(
 	ctx context.Context, pagination domains.Pagination,
 ) (domains.PaginationResult[TData], error) {
 	result, err := c.Pagination(ctx, pagination)
@@ -23,7 +23,7 @@ func (c *PaginationService[TData, TRequest, TID]) Paginate(
 // PaginateFilter is Paginate with filter overriding whatever
 // StructuredFilter pagination.Filter already carries — the caller-supplied
 // filter always wins.
-func (c *PaginationService[TData, TRequest, TID]) PaginateFilter(
+func (c *PaginationService[TData, TID]) PaginateFilter(
 	ctx context.Context, filter domains.StructuredFilter, pagination domains.Pagination,
 ) (domains.PaginationResult[TData], error) {
 	pagination.Filter = filter
@@ -33,7 +33,7 @@ func (c *PaginationService[TData, TRequest, TID]) PaginateFilter(
 // Filter is PaginateFilter against a zero-value domains.Pagination (default
 // page size, no cursor) — a convenience for callers that only need the
 // first page of a filtered result.
-func (c *PaginationService[TData, TRequest, TID]) Filter(
+func (c *PaginationService[TData, TID]) Filter(
 	ctx context.Context, filter domains.StructuredFilter,
 ) (domains.PaginationResult[TData], error) {
 	return c.PaginateFilter(ctx, filter, domains.Pagination{})
@@ -43,7 +43,7 @@ func (c *PaginationService[TData, TRequest, TID]) Filter(
 // instead of ReadSQLService's own client — e.g. reading back rows written
 // earlier in the same transaction, before it commits and becomes visible
 // through a separate connection.
-func (c *PaginationService[TData, TRequest, TID]) FilterWithTx(
+func (c *PaginationService[TData, TID]) FilterWithTx(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter, pagination domains.Pagination,
 ) (domains.PaginationResult[TData], error) {
 	if err := c.checkReady(); err != nil {

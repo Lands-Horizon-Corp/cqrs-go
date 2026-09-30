@@ -25,7 +25,7 @@ func TestPagination_ZeroValue_BypassingConstructorWithEmptyColumnDefaultID(t *te
 	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha"})
 
 	// Deliberately NOT using pagination.NewPaginationService.
-	raw := pagination.PaginationService[widget, any, string]{
+	raw := pagination.PaginationService[widget, string]{
 		ReadSQLService: read,
 	}
 	_, err := raw.Pagination(context.Background(), domains.Pagination{})
@@ -44,7 +44,7 @@ func TestPagination_ZeroValue_BypassingConstructorWithEmptyColumnDefaultID(t *te
 // raw struct literal that bypasses the constructor entirely can reach it.
 func TestPagination_ZeroValue_NilReadSQLServiceReturnsErrorWhenCallingPaginationDirectly(t *testing.T) {
 	t.Parallel()
-	raw := pagination.PaginationService[widget, any, string]{
+	raw := pagination.PaginationService[widget, string]{
 		// ReadSQLService deliberately left nil.
 	}
 	_, err := raw.Pagination(context.Background(), domains.Pagination{})
@@ -65,7 +65,7 @@ func TestPagination_ZeroValue_EmptyColumnDefaultSortWithNonEmptyColumnDefaultIDF
 	read := newFakeSQLService(t)
 	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha"}, widget{ID: "w2", Name: "Beta"})
 
-	raw := pagination.PaginationService[widget, any, string]{
+	raw := pagination.PaginationService[widget, string]{
 		ReadSQLService:  read,
 		ColumnDefaultID: "id",
 		// ColumnDefaultSort deliberately left empty.

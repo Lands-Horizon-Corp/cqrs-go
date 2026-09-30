@@ -41,7 +41,7 @@ type SQLService interface {
 // type just to name the interface. There is no TResponse here: pagination
 // only ever hands back the raw TData rows straight from SQL, never a
 // ToResource-converted view.
-type PaginationService[TData any, TRequest any, TID comparable] interface {
+type PaginationService[TData any, TID comparable] interface {
 	Paginate(ctx context.Context, pagination Pagination) (PaginationResult[TData], error)
 	PaginateFilter(ctx context.Context, filter StructuredFilter, pagination Pagination) (PaginationResult[TData], error)
 	Filter(ctx context.Context, filter StructuredFilter) (PaginationResult[TData], error)

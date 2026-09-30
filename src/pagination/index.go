@@ -9,7 +9,7 @@ import (
 // doc comment for why pagination is a query-side-only operation), so it
 // deliberately doesn't carry a WriteSQLService, Validator, or any of the
 // CDC/broadcast machinery CQRSImpl needs for the write path.
-type PaginationService[TData any, TRequest any, TID comparable] struct {
+type PaginationService[TData any, TID comparable] struct {
 	ReadSQLService domains.SQLService
 
 	// LogService is optional — when set, a filter whose Field doesn't
@@ -29,9 +29,9 @@ type PaginationService[TData any, TRequest any, TID comparable] struct {
 // panics if ReadSQLService is nil — fail-fast at construction time, same
 // as cqrs.NewCQRS does for WriteSQLService, rather than surfacing a nil
 // dependency only when the first page is requested.
-func NewPaginationService[TData any, TRequest any, TID comparable](
-	p PaginationService[TData, TRequest, TID],
-) *PaginationService[TData, TRequest, TID] {
+func NewPaginationService[TData any, TID comparable](
+	p PaginationService[TData, TID],
+) *PaginationService[TData, TID] {
 	if p.ColumnDefaultID == "" {
 		p.ColumnDefaultID = "id"
 	}
@@ -41,7 +41,7 @@ func NewPaginationService[TData any, TRequest any, TID comparable](
 	if p.ReadSQLService == nil {
 		panic("ReadSQLService must be initialized")
 	}
-	return &PaginationService[TData, TRequest, TID]{
+	return &PaginationService[TData, TID]{
 		ReadSQLService:    p.ReadSQLService,
 		LogService:        p.LogService,
 		ColumnDefaultID:   p.ColumnDefaultID,

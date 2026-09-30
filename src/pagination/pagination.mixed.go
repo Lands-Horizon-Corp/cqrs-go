@@ -36,7 +36,7 @@ import (
 // full index scan. This CTE-per-branch form keeps every branch on a genuine
 // Index Cond range scan instead — ~250x faster on that same table and
 // query shape.
-func (c *PaginationService[TData, TRequest, TID]) paginateMixedDirection(
+func (c *PaginationService[TData, TID]) paginateMixedDirection(
 	ctx context.Context,
 	db bun.IDB,
 	data *[]TData,

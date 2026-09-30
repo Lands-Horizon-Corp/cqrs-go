@@ -43,7 +43,7 @@ func TestPagination_HappyPath_UnknownFilterFieldLogsAWarnWhenDropped(t *testing.
 	t.Parallel()
 	read := newFakeSQLService(t)
 	logs := &fakeLogService{}
-	c := pagination.NewPaginationService(pagination.PaginationService[widget, any, string]{
+	c := pagination.NewPaginationService(pagination.PaginationService[widget, string]{
 		ReadSQLService: read,
 		LogService:     logs,
 	})

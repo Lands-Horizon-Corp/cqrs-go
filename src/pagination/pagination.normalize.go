@@ -20,7 +20,7 @@ import (
 // ignore that one term and keep serving the rest of the request, the same
 // way an unknown query-string parameter is typically ignored rather than
 // rejected outright.
-func (c *PaginationService[TData, TRequest, TID]) normalizeFilters(
+func (c *PaginationService[TData, TID]) normalizeFilters(
 	ctx context.Context, filters []domains.Filter,
 ) []domains.Filter {
 	if len(filters) == 0 {

@@ -49,11 +49,11 @@ func partitionedLedgerEntryToResource(e *partitionedLedgerEntry) *partitionedLed
 	return &partitionedLedgerEntryResource{ID: e.ID, CreatedAt: e.CreatedAt, Amount: e.Amount}
 }
 
-func newPartitionTestCQRS(t *testing.T) (*pagination.PaginationService[partitionedLedgerEntry, any, string], *fakeSQLService) {
+func newPartitionTestCQRS(t *testing.T) (*pagination.PaginationService[partitionedLedgerEntry, string], *fakeSQLService) {
 	t.Helper()
 	skipUnlessInfraReachable(t)
 	read := newPostgresSQLService(t, itReadDSN)
-	p := pagination.NewPaginationService(pagination.PaginationService[partitionedLedgerEntry, any, string]{
+	p := pagination.NewPaginationService(pagination.PaginationService[partitionedLedgerEntry, string]{
 		ReadSQLService: read,
 		// NewPaginationService's own default ("updated_at DESC") doesn't
 		// apply here — partitionedLedgerEntry has no updated_at column,
@@ -184,7 +184,7 @@ func TestIntegration_SadPath_EnablePartitioningReturnsErrorWhenReadSQLServiceIsN
 	// Bypasses NewPaginationService (which panics on this) to reach
 	// EnablePartitioning's own defensive nil-check directly, the same class
 	// of constructor-bypass scenario covered for Pagination itself.
-	raw := pagination.PaginationService[partitionedLedgerEntry, any, string]{}
+	raw := pagination.PaginationService[partitionedLedgerEntry, string]{}
 	if err := raw.EnablePartitioning(context.Background(), "created_at", "1 day"); err == nil {
 		t.Fatal("expected an error when ReadSQLService is nil, got nil")
 	}
@@ -226,7 +226,7 @@ func TestIntegration_SadPath_NewPaginationServicePanicsWhenReadSQLServiceIsNil(t
 			t.Fatal("expected NewPaginationService to panic when ReadSQLService is nil, got no panic")
 		}
 	}()
-	pagination.NewPaginationService(pagination.PaginationService[partitionedLedgerEntry, any, string]{
+	pagination.NewPaginationService(pagination.PaginationService[partitionedLedgerEntry, string]{
 		// ReadSQLService deliberately left nil.
 	})
 }

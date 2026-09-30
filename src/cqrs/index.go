@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
+	"github.com/Lands-Horizon-Corp/cqrs-go/src/pagination"
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/utils"
 	"github.com/go-playground/validator/v10"
 )
@@ -31,7 +32,7 @@ type CQRSImpl[TData any, TResponse any, TRequest any, TID comparable] struct {
 	LogService           domains.LogService
 	BroadcastService     domains.BroadcastService
 	MessageBrokerService domains.MessageBrokerService
-	paginationService    domains.PaginationService[TData, TRequest, TID]
+	paginationService    domains.PaginationService[TData, TID]
 
 	// Validator for struct validation
 	Validator *validator.Validate
@@ -78,6 +79,22 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 	if c.FlushInterval == 0 {
 		c.FlushInterval = 5 * time.Second
 	}
+	// ReadSQLService is optional on CQRSImpl (only WriteSQLService is
+	// required, see the panic above) — a write-only setup with no read db
+	// configured has nothing for the embedded pagination service to query
+	// either, and pagination.NewPaginationService itself panics on a nil
+	// ReadSQLService, so it's only built when one is actually set.
+	var paginationSvc domains.PaginationService[TData, TID]
+	if c.ReadSQLService != nil {
+		paginationSvc = pagination.NewPaginationService[TData, TID](pagination.PaginationService[TData, TID]{
+			ReadSQLService:    c.ReadSQLService,
+			LogService:        c.LogService,
+			ColumnDefaultID:   c.ColumnDefaultID,
+			ColumnDefaultSort: c.ColumnDefaultSort,
+			Preloads:          c.Preloads,
+		})
+	}
+
 	return &CQRSImpl[TData, TResponse, TRequest, TID]{
 		Channel:              c.Channel,
 		ColumnDefaultID:      c.ColumnDefaultID,
@@ -101,5 +118,6 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 		BatchSize:            c.BatchSize,
 		FlushInterval:        c.FlushInterval,
 		idFieldIndex:         utils.BunColumnFieldIndex[TData](c.ColumnDefaultID),
+		paginationService:    paginationSvc,
 	}
 }

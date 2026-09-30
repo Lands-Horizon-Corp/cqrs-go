@@ -21,10 +21,10 @@ import (
 
 // newPaginationQueryTestCQRS points ReadSQLService at an in-memory SQLite db
 // using the same fakeSQLService/widget fixture as the rest of this suite.
-func newPaginationQueryTestCQRS(t *testing.T) (*pagination.PaginationService[widget, any, string], *fakeSQLService) {
+func newPaginationQueryTestCQRS(t *testing.T) (*pagination.PaginationService[widget, string], *fakeSQLService) {
 	t.Helper()
 	read := newFakeSQLService(t)
-	p := pagination.NewPaginationService(pagination.PaginationService[widget, any, string]{
+	p := pagination.NewPaginationService(pagination.PaginationService[widget, string]{
 		ReadSQLService: read,
 	})
 	return p, read
@@ -33,8 +33,8 @@ func newPaginationQueryTestCQRS(t *testing.T) (*pagination.PaginationService[wid
 // newPaginationPreloadService builds a PaginationService over the same
 // preloadPost/preloadAuthor fixture pair preload_test.go uses for the
 // write-path preload tests, sharing db so both sides see the same data.
-func newPaginationPreloadService(db *bun.DB) *pagination.PaginationService[preloadPost, any, string] {
-	return pagination.NewPaginationService(pagination.PaginationService[preloadPost, any, string]{
+func newPaginationPreloadService(db *bun.DB) *pagination.PaginationService[preloadPost, string] {
+	return pagination.NewPaginationService(pagination.PaginationService[preloadPost, string]{
 		ReadSQLService: &fakeSQLService{db: db},
 	})
 }
@@ -204,7 +204,7 @@ func TestPagination_HappyPath_PreloadIntegration(t *testing.T) {
 		t.Fatalf("seed CreateMany returned error: %v", err)
 	}
 
-	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, any, string]{
+	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, string]{
 		ReadSQLService: &fakeSQLService{db: db},
 	})
 
@@ -261,7 +261,7 @@ func TestPagination_SadPath_NewPaginationServicePanicsWhenReadSQLServiceIsNil(t 
 			t.Fatal("expected NewPaginationService to panic when ReadSQLService is nil, got no panic")
 		}
 	}()
-	pagination.NewPaginationService(pagination.PaginationService[widget, any, string]{
+	pagination.NewPaginationService(pagination.PaginationService[widget, string]{
 		// ReadSQLService deliberately left nil.
 	})
 }
@@ -457,7 +457,7 @@ func TestPagination_PoisonPill_InvalidExplicitSortOrderNormalizesToAscending(t *
 func TestPagination_HappyPath_ColumnDefaultSortAscendingIsUsedWhenNoSortFieldsGiven(t *testing.T) {
 	t.Parallel()
 	read := newFakeSQLService(t)
-	c := pagination.NewPaginationService(pagination.PaginationService[widget, any, string]{
+	c := pagination.NewPaginationService(pagination.PaginationService[widget, string]{
 		ReadSQLService:    read,
 		ColumnDefaultSort: "priority asc",
 	})
@@ -517,7 +517,7 @@ func TestPagination_SadPath_UnknownPreloadRelationReturnsError(t *testing.T) {
 		t.Fatalf("seed CreateMany returned error: %v", err)
 	}
 
-	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, any, string]{
+	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, string]{
 		ReadSQLService: &fakeSQLService{db: db},
 	})
 
@@ -992,7 +992,7 @@ func TestPagination_HappyPath_PreloadAppliesOnEveryPageOfAMultiPageWalk(t *testi
 		t.Fatalf("seed CreateMany returned error: %v", err)
 	}
 
-	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, any, string]{
+	pc := pagination.NewPaginationService(pagination.PaginationService[preloadPost, string]{
 		ReadSQLService: &fakeSQLService{db: db},
 	})
 

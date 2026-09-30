@@ -16,14 +16,14 @@ import (
 // (widget here), never a ToResource-converted view.
 
 // asPaginationServiceInterface fails to compile if *pagination.PaginationService
-// ever stops satisfying domains.PaginationService[widget, any, string] — a
+// ever stops satisfying domains.PaginationService[widget,  string] — a
 // static assertion, exercised through an actual variable of the interface
 // type so every test below also proves the assignment works, not just the
 // type.
-func asPaginationServiceInterface(t *testing.T) (domains.PaginationService[widget, any, string], *fakeSQLService) {
+func asPaginationServiceInterface(t *testing.T) (domains.PaginationService[widget, string], *fakeSQLService) {
 	t.Helper()
 	c, read := newPaginationQueryTestCQRS(t)
-	var iface domains.PaginationService[widget, any, string] = c
+	var iface domains.PaginationService[widget, string] = c
 	return iface, read
 }
 
