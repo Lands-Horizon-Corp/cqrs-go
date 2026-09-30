@@ -50,7 +50,7 @@ func (c *PaginationService[TData, TID]) Pagination(
 	if err := c.checkReady(); err != nil {
 		return nil, err
 	}
-	return c.paginate(ctx, c.ReadSQLService.Client(), pagination, preloads...)
+	return c.paginate(ctx, c.ReadSQLService.Client(), domains.StructuredFilter{}, pagination, preloads...)
 }
 
 // checkReady validates the operator-configured fields Pagination and every
@@ -81,9 +81,17 @@ func (c *PaginationService[TData, TID]) checkReady() error {
 // *bun.Tx (e.g. reading back rows written earlier in the same transaction,
 // before it commits) instead of a separate connection that wouldn't see
 // them yet.
+// paginate combines two independent StructuredFilters with AND: extraFilter
+// (backend-hardcoded, e.g. tenant scoping — trusted, so an unknown field in
+// it is a real error, not something to silently drop) and
+// pagination.Filter (frontend-supplied, run through normalizeFilters'
+// lenient drop-and-warn first). PaginateFilter/FilterWithTx are what give
+// callers a way to supply extraFilter; Pagination itself always passes a
+// zero-value one, which applyFilters treats as a no-op.
 func (c *PaginationService[TData, TID]) paginate(
 	ctx context.Context,
 	db bun.IDB,
+	extraFilter domains.StructuredFilter,
 	pagination domains.Pagination,
 	preloads ...string,
 ) (*domains.PaginationResult[TData], error) {
@@ -117,11 +125,19 @@ func (c *PaginationService[TData, TID]) paginate(
 
 	var data []TData
 	if hasCursor && !uniform {
-		if err := c.paginateMixedDirection(ctx, db, &data, pagination.Filter, sortFields, payload, backward, limit); err != nil {
+		if err := c.paginateMixedDirection(ctx, db, &data, extraFilter, pagination.Filter, sortFields, payload, backward, limit); err != nil {
 			return nil, err
 		}
 	} else {
 		q := db.NewSelect().Model(&data)
+		// Two separate WhereGroup calls, not one merged Filters slice: each
+		// side keeps its own Logic (AND/OR among its own Filters), and bun
+		// ANDs the two resulting groups together at the top level — exactly
+		// "(extraFilter) AND (pagination.Filter)", never one clobbering the
+		// other's internal logic.
+		if q, err = c.applyFilters(q, extraFilter); err != nil {
+			return nil, fmt.Errorf("applying hardcoded filter: %w", err)
+		}
 		if q, err = c.applyFilters(q, pagination.Filter); err != nil {
 			return nil, fmt.Errorf("applying filters: %w", err)
 		}

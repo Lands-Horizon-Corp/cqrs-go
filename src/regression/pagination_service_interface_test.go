@@ -54,25 +54,85 @@ func TestPagination_SadPath_PaginateReturnsErrorNotPanicOnUnknownSortField(t *te
 	}
 }
 
-func TestPagination_HappyPath_PaginateFilterOverridesPaginationFilterField(t *testing.T) {
+// TestPagination_HappyPath_PaginateFilterCombinesBothFiltersWithAnd is the
+// whole reason PaginateFilter takes filter as a separate parameter from
+// pagination: filter is typically backend-hardcoded (e.g. tenant scoping),
+// pagination.Filter is typically frontend-supplied — neither should
+// override the other, both must apply together as
+// "(filter) AND (pagination.Filter)".
+func TestPagination_HappyPath_PaginateFilterCombinesBothFiltersWithAnd(t *testing.T) {
 	t.Parallel()
 	c, read := asPaginationServiceInterface(t)
-	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha"}, widget{ID: "w2", Name: "Beta"})
+	seedWidgets(t, read,
+		widget{ID: "w1", Name: "Alpha", Priority: new(1)},
+		widget{ID: "w2", Name: "Alpha", Priority: new(2)},
+		widget{ID: "w3", Name: "Beta", Priority: new(1)},
+	)
 
-	// pagination.Filter narrows to "Alpha", but the explicit filter argument
-	// (narrowing to "Beta") must be what actually applies.
+	// filter (hardcoded): name = "Alpha". pagination.Filter (frontend):
+	// priority = 1. Only w1 satisfies both.
 	result, err := c.PaginateFilter(
 		context.Background(),
-		domains.StructuredFilter{Filters: []domains.Filter{{Field: "name", Mode: domains.ModeEqual, Value: "Beta"}}},
+		domains.StructuredFilter{Filters: []domains.Filter{{Field: "name", Mode: domains.ModeEqual, Value: "Alpha"}}},
 		domains.Pagination{
-			Filter: domains.StructuredFilter{Filters: []domains.Filter{{Field: "name", Mode: domains.ModeEqual, Value: "Alpha"}}},
+			Filter: domains.StructuredFilter{Filters: []domains.Filter{{Field: "priority", Mode: domains.ModeEqual, Value: 1}}},
 		},
 	)
 	if err != nil {
 		t.Fatalf("PaginateFilter returned error: %v", err)
 	}
-	if len(result.Data) != 1 || result.Data[0].ID != "w2" {
-		t.Fatalf("expected the explicit filter argument to win, got %+v", result.Data)
+	if len(result.Data) != 1 || result.Data[0].ID != "w1" {
+		t.Fatalf("expected only [w1] (name=Alpha AND priority=1), got %+v", result.Data)
+	}
+}
+
+// TestPagination_HappyPath_PaginateFilterCombinesFiltersOnMixedDirectionPath
+// is the same "(filter) AND (pagination.Filter)" guarantee, but on
+// paginateMixedDirection's own code path (a genuinely mixed ascending/
+// descending multi-column sort, walked backward via a real cursor) rather
+// than the uniform row-value-comparison path the test above exercises —
+// each UNION ALL branch needs the hardcoded filter applied too, or a
+// backward walk on a mixed-direction sort would silently bypass it.
+func TestPagination_HappyPath_PaginateFilterCombinesFiltersOnMixedDirectionPath(t *testing.T) {
+	t.Parallel()
+	c, read := asPaginationServiceInterface(t)
+	ctx := context.Background()
+	seedWidgets(t, read,
+		widget{ID: "b", Name: "Bravo", Priority: new(5)},
+		widget{ID: "c", Name: "Charlie", Priority: new(5)},
+		widget{ID: "a", Name: "Alpha", Priority: new(9)},
+	)
+	sortFields := []domains.SortField{
+		{Field: "priority", Order: domains.SortOrderDesc},
+		{Field: "name", Order: domains.SortOrderAsc},
+	}
+
+	page1, err := c.Paginate(ctx, domains.Pagination{Filter: domains.StructuredFilter{SortFields: sortFields}, PageSize: 1})
+	if err != nil {
+		t.Fatalf("page1 error: %v", err)
+	}
+	page2, err := c.Paginate(ctx, domains.Pagination{
+		Filter: domains.StructuredFilter{SortFields: sortFields}, PageSize: 1, Cursor: page1.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("page2 error: %v", err)
+	}
+	if page2.Data[0].ID != "b" {
+		t.Fatalf("expected page2 to be [b], got %+v", page2.Data)
+	}
+
+	// Walking backward from here without any hardcoded filter reproduces
+	// page1's row [a] (same as TestPagination_HappyPath_BackwardDirectionWithMixedDirectionSort).
+	// A hardcoded filter excluding "a" must still suppress it here too.
+	back, err := c.PaginateFilter(ctx,
+		domains.StructuredFilter{Filters: []domains.Filter{{Field: "id", Mode: domains.ModeNotEqual, Value: "a"}}},
+		domains.Pagination{Filter: domains.StructuredFilter{SortFields: sortFields}, PageSize: 1, Cursor: page2.PreviousCursor},
+	)
+	if err != nil {
+		t.Fatalf("backward PaginateFilter error: %v", err)
+	}
+	if len(back.Data) != 0 {
+		t.Fatalf("expected the hardcoded filter to exclude \"a\" on the mixed-direction backward path, got %+v", back.Data)
 	}
 }
 
@@ -116,7 +176,7 @@ func TestPagination_HappyPath_FilterWithTxSeesUncommittedWritesInTheSameTx(t *te
 	}
 
 	// FilterWithTx, given the same tx, must see the uncommitted row.
-	inTx, err := c.FilterWithTx(ctx, &tx, domains.StructuredFilter{}, domains.Pagination{})
+	inTx, err := c.FilterWithTx(ctx, &tx, domains.StructuredFilter{})
 	if err != nil {
 		t.Fatalf("FilterWithTx returned error: %v", err)
 	}
@@ -139,7 +199,14 @@ func TestPagination_HappyPath_FilterWithTxSeesUncommittedWritesInTheSameTx(t *te
 	}
 }
 
-func TestPagination_HappyPath_FilterWithTxDropsUnknownFilterFieldInsteadOfErroring(t *testing.T) {
+// TestPagination_SadPath_FilterWithTxUnknownFieldErrorsRatherThanDropping
+// documents a deliberate asymmetry: FilterWithTx's filter argument is the
+// backend-hardcoded side of "(filter) AND (pagination.Filter)" (see
+// PaginateFilter), so it's trusted code, not untrusted client input — an
+// unknown field in it is a real bug worth a hard error, not something to
+// silently drop-and-warn the way normalizeFilters treats a frontend
+// filter's unknown field.
+func TestPagination_SadPath_FilterWithTxUnknownFieldErrorsRatherThanDropping(t *testing.T) {
 	t.Parallel()
 	c, read := asPaginationServiceInterface(t)
 	ctx := context.Background()
@@ -151,15 +218,11 @@ func TestPagination_HappyPath_FilterWithTxDropsUnknownFilterFieldInsteadOfErrori
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	result, err := c.FilterWithTx(ctx, &tx,
+	_, err = c.FilterWithTx(ctx, &tx,
 		domains.StructuredFilter{Filters: []domains.Filter{{Field: "not_a_real_column", Mode: domains.ModeEqual, Value: "x"}}},
-		domains.Pagination{},
 	)
-	if err != nil {
-		t.Fatalf("expected the unknown filter field to be dropped rather than error, got: %v", err)
-	}
-	if len(result.Data) != 1 {
-		t.Fatalf("expected the seeded row back (unknown filter ignored), got %+v", result.Data)
+	if err == nil {
+		t.Fatal("expected an error for an unknown field in the hardcoded filter, got nil")
 	}
 }
 
@@ -177,7 +240,7 @@ func TestPagination_SadPath_FilterWithTxReturnsErrorWhenColumnDefaultIDIsEmpty(t
 	// Bypass the constructor's ColumnDefaultID default, same class of setup
 	// error checkReady guards Pagination against.
 	c.ColumnDefaultID = ""
-	if _, err := c.FilterWithTx(ctx, &tx, domains.StructuredFilter{}, domains.Pagination{}); err == nil {
+	if _, err := c.FilterWithTx(ctx, &tx, domains.StructuredFilter{}); err == nil {
 		t.Fatal("expected an error for an empty ColumnDefaultID, got nil")
 	}
 }

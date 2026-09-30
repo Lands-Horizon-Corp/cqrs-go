@@ -44,7 +44,7 @@ type SQLService interface {
 type PaginationService[TData any, TID comparable] interface {
 	Paginate(ctx context.Context, pagination Pagination) (PaginationResult[TData], error)
 	PaginateFilter(ctx context.Context, filter StructuredFilter, pagination Pagination) (PaginationResult[TData], error)
-	Filter(ctx context.Context, filter StructuredFilter) (PaginationResult[TData], error)
 
-	FilterWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter, pagination Pagination) (PaginationResult[TData], error)
+	Filter(ctx context.Context, filter StructuredFilter) (PaginationResult[TData], error)
+	FilterWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter) (PaginationResult[TData], error)
 }

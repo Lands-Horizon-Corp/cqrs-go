@@ -254,16 +254,39 @@ func TestPagination_SadPath_UnknownFilterFieldIsDroppedNotAnError(t *testing.T) 
 	}
 }
 
-func TestPagination_SadPath_NewPaginationServicePanicsWhenReadSQLServiceIsNil(t *testing.T) {
+func TestPagination_SadPath_NewPaginationServicePanicsWhenNeitherReadNorWriteSQLServiceIsSet(t *testing.T) {
 	t.Parallel()
 	defer func() {
 		if r := recover(); r == nil {
-			t.Fatal("expected NewPaginationService to panic when ReadSQLService is nil, got no panic")
+			t.Fatal("expected NewPaginationService to panic when neither ReadSQLService nor WriteSQLService is set, got no panic")
 		}
 	}()
 	pagination.NewPaginationService(pagination.PaginationService[widget, string]{
-		// ReadSQLService deliberately left nil.
+		// ReadSQLService and WriteSQLService both deliberately left nil.
 	})
+}
+
+// TestPagination_HappyPath_NewPaginationServiceFallsBackToWriteSQLServiceWhenReadIsNil
+// covers the fallback chain itself: a smaller deployment with no dedicated
+// read replica can set only WriteSQLService and pagination still works,
+// reading through it exactly as it would through ReadSQLService.
+func TestPagination_HappyPath_NewPaginationServiceFallsBackToWriteSQLServiceWhenReadIsNil(t *testing.T) {
+	t.Parallel()
+	write := newFakeSQLService(t)
+	seedWidgets(t, write, widget{ID: "w1", Name: "Alpha"})
+
+	c := pagination.NewPaginationService(pagination.PaginationService[widget, string]{
+		WriteSQLService: write,
+		// ReadSQLService deliberately left nil — WriteSQLService must be
+		// used as the fallback instead of panicking.
+	})
+	result, err := c.Pagination(context.Background(), domains.Pagination{})
+	if err != nil {
+		t.Fatalf("Pagination returned error: %v", err)
+	}
+	if len(result.Data) != 1 || result.Data[0].ID != "w1" {
+		t.Fatalf("expected the seeded row back via the WriteSQLService fallback, got %+v", result.Data)
+	}
 }
 
 func TestPagination_PoisonPill_UnsupportedFilterModeReturnsError(t *testing.T) {

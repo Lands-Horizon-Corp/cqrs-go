@@ -219,15 +219,15 @@ func TestIntegration_SadPath_EnablePartitioningInvalidIntervalReturnsError(t *te
 	}
 }
 
-func TestIntegration_SadPath_NewPaginationServicePanicsWhenReadSQLServiceIsNil(t *testing.T) {
+func TestIntegration_SadPath_NewPaginationServicePanicsWhenNeitherReadNorWriteSQLServiceIsSet(t *testing.T) {
 	t.Parallel()
 	defer func() {
 		if r := recover(); r == nil {
-			t.Fatal("expected NewPaginationService to panic when ReadSQLService is nil, got no panic")
+			t.Fatal("expected NewPaginationService to panic when neither ReadSQLService nor WriteSQLService is set, got no panic")
 		}
 	}()
 	pagination.NewPaginationService(pagination.PaginationService[partitionedLedgerEntry, string]{
-		// ReadSQLService deliberately left nil.
+		// ReadSQLService and WriteSQLService both deliberately left nil.
 	})
 }
 

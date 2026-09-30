@@ -80,20 +80,19 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 		c.FlushInterval = 5 * time.Second
 	}
 	// ReadSQLService is optional on CQRSImpl (only WriteSQLService is
-	// required, see the panic above) — a write-only setup with no read db
-	// configured has nothing for the embedded pagination service to query
-	// either, and pagination.NewPaginationService itself panics on a nil
-	// ReadSQLService, so it's only built when one is actually set.
-	var paginationSvc domains.PaginationService[TData, TID]
-	if c.ReadSQLService != nil {
-		paginationSvc = pagination.NewPaginationService[TData, TID](pagination.PaginationService[TData, TID]{
-			ReadSQLService:    c.ReadSQLService,
-			LogService:        c.LogService,
-			ColumnDefaultID:   c.ColumnDefaultID,
-			ColumnDefaultSort: c.ColumnDefaultSort,
-			Preloads:          c.Preloads,
-		})
-	}
+	// required, see the panic above) — the embedded pagination service
+	// gets both and falls back to WriteSQLService itself when
+	// ReadSQLService isn't set (see pagination.NewPaginationService), so
+	// this never panics: WriteSQLService is already guaranteed non-nil by
+	// this point.
+	paginationSvc := pagination.NewPaginationService[TData, TID](pagination.PaginationService[TData, TID]{
+		ReadSQLService:    c.ReadSQLService,
+		WriteSQLService:   c.WriteSQLService,
+		LogService:        c.LogService,
+		ColumnDefaultID:   c.ColumnDefaultID,
+		ColumnDefaultSort: c.ColumnDefaultSort,
+		Preloads:          c.Preloads,
+	})
 
 	return &CQRSImpl[TData, TResponse, TRequest, TID]{
 		Channel:              c.Channel,

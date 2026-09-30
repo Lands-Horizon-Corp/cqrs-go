@@ -38,7 +38,12 @@ func (c *PaginationService[TData, TID]) applyFilters(
 			if groupErr != nil {
 				break
 			}
-			if utils.BunColumnFieldIndex[TData](f.Field) == -1 {
+			// ModeSearch with an empty Field means "search every column
+			// EnableSearchIndex indexed" (see applyFilterTerm) rather than
+			// naming one real column — that's the one case allowed to skip
+			// the unknown-field check below.
+			wholeIndexSearch := f.Mode == domains.ModeSearch && f.Field == ""
+			if !wholeIndexSearch && utils.BunColumnFieldIndex[TData](f.Field) == -1 {
 				groupErr = fmt.Errorf("unknown filter field %q", f.Field)
 				break
 			}
@@ -48,7 +53,7 @@ func (c *PaginationService[TData, TID]) applyFilters(
 				// a valid query back, even when we're about to abort via
 				// groupErr — returning the original inner unchanged keeps
 				// bun's internal chain intact.
-				newQ, err := applyFilterTerm(inner, f)
+				newQ, err := applyFilterTerm(inner, f, c.ColumnDefaultID)
 				if err != nil {
 					groupErr = fmt.Errorf("filter %q: %w", f.Field, err)
 					return inner
@@ -64,7 +69,13 @@ func (c *PaginationService[TData, TID]) applyFilters(
 	return q, nil
 }
 
-func applyFilterTerm(q *bun.SelectQuery, f domains.Filter) (*bun.SelectQuery, error) {
+// applyFilterTerm builds one filter's WHERE term. columnDefaultID is only
+// used by ModeSearch's whole-index case (empty f.Field) — the BM25 index's
+// key_field, which paradedb.parse's lenient multi-field search runs
+// against (see the ModeSearch case below for why the query shape differs
+// between the scoped and whole-index forms; both were verified directly
+// against a real ParadeDB-enabled Postgres instance before writing this).
+func applyFilterTerm(q *bun.SelectQuery, f domains.Filter, columnDefaultID string) (*bun.SelectQuery, error) {
 	col := bun.Ident(f.Field)
 	switch f.Mode {
 	case domains.ModeEqual, domains.ModeNotEqual, domains.ModeGT, domains.ModeGTE,
@@ -112,6 +123,22 @@ func applyFilterTerm(q *bun.SelectQuery, f domains.Filter) (*bun.SelectQuery, er
 		return q.Where("? IN (?)", col, bun.In(f.Value)), nil
 	case domains.ModeOutside:
 		return q.Where("? NOT IN (?)", col, bun.In(f.Value)), nil
+	case domains.ModeSearch:
+		// Scoped to one real column: a plain "col @@@ 'term'" already
+		// works directly (confirmed directly against a real pg_search
+		// index: "name @@@ 'running'" matches "running shoes" via the
+		// BM25 index, no query-builder wrapper needed).
+		if f.Field != "" {
+			return q.Where("? @@@ ?", col, fmt.Sprint(f.Value)), nil
+		}
+		// Whole-index (every column EnableSearchIndex indexed): a bare
+		// "key_field @@@ 'term'" does NOT search every indexed column by
+		// itself (confirmed directly: it matched nothing at all) —
+		// paradedb.parse(..., lenient => true) is what actually enables
+		// that "no field name given, search everything" behavior; without
+		// "lenient => true" a fieldless query string is rejected outright
+		// by pg_search's strict-mode parser.
+		return q.Where("? @@@ paradedb.parse(?, lenient => true)", bun.Ident(columnDefaultID), fmt.Sprint(f.Value)), nil
 	case domains.ModeRange:
 		from, to, err := extractRangeBounds(f.Value)
 		if err != nil {

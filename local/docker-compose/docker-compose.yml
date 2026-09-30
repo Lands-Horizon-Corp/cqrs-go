@@ -45,13 +45,14 @@ services:
   # deployment) writes here. No logical-replication settings needed.
   #
   # Built (not a plain image) so it also gets pg_duckdb, timescaledb, and
-  # pg_partman on top of pgvector/pgcrypto -- see postgres-read/Dockerfile
-  # for why those three specifically live on the read side. pg_duckdb and
-  # timescaledb both need to be in shared_preload_libraries to actually
-  # activate (verified: pg_duckdb's image sets this to itself alone by
-  # default, and the timescaledb package's postinst doesn't reliably touch
-  # the data directory this entrypoint actually initializes), hence the
-  # explicit -c flag below.
+  # pg_partman and pg_search on top of pgvector/pgcrypto -- see
+  # postgres-read/Dockerfile for why those four specifically live on the
+  # read side. pg_duckdb, timescaledb, and pg_search all need to be in
+  # shared_preload_libraries to actually activate (verified: pg_duckdb's
+  # image sets this to itself alone by default, the timescaledb package's
+  # postinst doesn't reliably touch the data directory this entrypoint
+  # actually initializes, and pg_search's own docs list this as required),
+  # hence the explicit -c flag below.
   postgres-read:
     build: ./postgres-read
     container_name: cqrs-postgres-read
@@ -63,7 +64,7 @@ services:
     command:
       - postgres
       - -c
-      - shared_preload_libraries=pg_duckdb,timescaledb
+      - shared_preload_libraries=pg_duckdb,timescaledb,pg_search
     ports:
       - "15434:5432"
     volumes:

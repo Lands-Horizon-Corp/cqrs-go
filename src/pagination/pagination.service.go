@@ -20,37 +20,50 @@ func (c *PaginationService[TData, TID]) Paginate(
 	return *result, nil
 }
 
-// PaginateFilter is Paginate with filter overriding whatever
-// StructuredFilter pagination.Filter already carries — the caller-supplied
-// filter always wins.
+// PaginateFilter combines filter (typically backend-hardcoded — e.g.
+// tenant scoping) with whatever StructuredFilter pagination.Filter already
+// carries (typically frontend-supplied) as "(filter) AND
+// (pagination.Filter)" — neither one overrides or clobbers the other, each
+// keeps its own internal Logic (AND/OR among its own Filters). This is the
+// whole reason filter is a separate parameter from pagination in the first
+// place: pagination (page size, cursor, and whatever filter the frontend
+// sent) comes from the caller/request, filter is what the backend adds on
+// top unconditionally.
 func (c *PaginationService[TData, TID]) PaginateFilter(
 	ctx context.Context, filter domains.StructuredFilter, pagination domains.Pagination,
 ) (domains.PaginationResult[TData], error) {
-	pagination.Filter = filter
-	return c.Paginate(ctx, pagination)
+	if err := c.checkReady(); err != nil {
+		return domains.PaginationResult[TData]{}, err
+	}
+	result, err := c.paginate(ctx, c.ReadSQLService.Client(), filter, pagination)
+	if err != nil {
+		return domains.PaginationResult[TData]{}, err
+	}
+	return *result, nil
 }
 
 // Filter is PaginateFilter against a zero-value domains.Pagination (default
-// page size, no cursor) — a convenience for callers that only need the
-// first page of a filtered result.
+// page size, no cursor, no frontend-supplied filter) — a convenience for
+// callers that only need the first page of a filter-only result.
 func (c *PaginationService[TData, TID]) Filter(
 	ctx context.Context, filter domains.StructuredFilter,
 ) (domains.PaginationResult[TData], error) {
 	return c.PaginateFilter(ctx, filter, domains.Pagination{})
 }
 
-// FilterWithTx is PaginateFilter run against a caller-supplied *bun.Tx
-// instead of ReadSQLService's own client — e.g. reading back rows written
-// earlier in the same transaction, before it commits and becomes visible
-// through a separate connection.
+// FilterWithTx is Filter run against a caller-supplied *bun.Tx instead of
+// ReadSQLService's own client — e.g. reading back rows written earlier in
+// the same transaction, before it commits and becomes visible through a
+// separate connection. It's just a filter, the same way Filter is — no
+// pagination parameter, since a transactional read-your-writes lookup like
+// this has no frontend request behind it to carry page size/cursor for.
 func (c *PaginationService[TData, TID]) FilterWithTx(
-	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter, pagination domains.Pagination,
+	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter,
 ) (domains.PaginationResult[TData], error) {
 	if err := c.checkReady(); err != nil {
 		return domains.PaginationResult[TData]{}, err
 	}
-	pagination.Filter = filter
-	result, err := c.paginate(ctx, tx, pagination)
+	result, err := c.paginate(ctx, tx, filter, domains.Pagination{})
 	if err != nil {
 		return domains.PaginationResult[TData]{}, err
 	}

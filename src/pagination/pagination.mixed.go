@@ -40,6 +40,7 @@ func (c *PaginationService[TData, TID]) paginateMixedDirection(
 	ctx context.Context,
 	db bun.IDB,
 	data *[]TData,
+	extraFilter domains.StructuredFilter,
 	filterRoot domains.StructuredFilter,
 	sortFields []domains.SortField,
 	payload cursorPayload,
@@ -65,7 +66,16 @@ func (c *PaginationService[TData, TID]) paginateMixedDirection(
 	branchArgs := make([]any, 0, len(sortFields))
 	for idx := range sortFields {
 		branch := db.NewSelect().Model((*TData)(nil))
-		branch, err := c.applyFilters(branch, filterRoot)
+		// Same "(extraFilter) AND (filterRoot)" combination as the uniform
+		// query path (see paginate) — each branch of the mixed-direction
+		// union must stay scoped by both, or a backward cursor walk on a
+		// mixed-direction sort would silently bypass a hardcoded filter
+		// (e.g. tenant scoping) the uniform path enforces.
+		branch, err := c.applyFilters(branch, extraFilter)
+		if err != nil {
+			return fmt.Errorf("applying hardcoded filter: %w", err)
+		}
+		branch, err = c.applyFilters(branch, filterRoot)
 		if err != nil {
 			return fmt.Errorf("applying filters: %w", err)
 		}

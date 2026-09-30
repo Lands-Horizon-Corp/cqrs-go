@@ -72,3 +72,34 @@ func TestPagination_HappyPath_UnknownFilterFieldLogsAWarnWhenDropped(t *testing.
 	}
 	t.Fatalf("expected a warn log naming the dropped, normalized field; got %+v", logs.snapshot())
 }
+
+// TestPagination_HappyPath_WholeIndexSearchFilterSurvivesNormalization
+// covers a real bug class: {Mode: ModeSearch, Field: ""} means "search
+// every column EnableSearchIndex indexed" (see applyFilterTerm), not "an
+// unknown column named \"\"" — normalizeFilters must special-case it
+// rather than normalizing "" and dropping it like any other unresolvable
+// field.
+//
+// ModeSearch itself (the "@@@" operator) is ParadeDB/Postgres-only and has
+// no SQLite equivalent — genuinely exercising it lives in
+// integration_search_test.go against real Postgres. This test only proves
+// normalizeFilters doesn't drop the filter, without needing that real
+// infra: if it *had* been dropped, Filters would end up empty and this
+// call would succeed with the seeded row back. Instead it must reach
+// applyFilterTerm and build a query containing "@@@", which SQLite then
+// rejects with a syntax error — that error is the proof the filter
+// survived normalization intact.
+func TestPagination_HappyPath_WholeIndexSearchFilterSurvivesNormalization(t *testing.T) {
+	t.Parallel()
+	c, read := newPaginationQueryTestCQRS(t)
+	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha"})
+
+	_, err := c.Pagination(context.Background(), domains.Pagination{
+		Filter: domains.StructuredFilter{Filters: []domains.Filter{
+			{Field: "", Mode: domains.ModeSearch, Value: "alpha"},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected a SQLite syntax error from the @@@ operator (proving the filter reached query-building instead of being dropped), got nil")
+	}
+}

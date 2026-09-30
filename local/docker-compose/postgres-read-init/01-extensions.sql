@@ -16,3 +16,9 @@ CREATE EXTENSION IF NOT EXISTS timescaledb SCHEMA ts;
 -- Standard pg_partman convention: its own schema, not public.
 CREATE SCHEMA IF NOT EXISTS partman;
 CREATE EXTENSION IF NOT EXISTS pg_partman SCHEMA partman;
+
+-- pg_search (ParadeDB, BM25 search via the @@@ operator) requires pgvector
+-- (created above) and shared_preload_libraries=pg_search (set in
+-- docker-compose.yml's postgres-read command). CASCADE is a no-op safety
+-- net here, not what actually satisfies the pgvector prerequisite.
+CREATE EXTENSION IF NOT EXISTS pg_search CASCADE;

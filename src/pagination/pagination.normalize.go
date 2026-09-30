@@ -28,6 +28,15 @@ func (c *PaginationService[TData, TID]) normalizeFilters(
 	}
 	normalized := make([]domains.Filter, 0, len(filters))
 	for _, f := range filters {
+		// ModeSearch's empty-Field form means "search every column
+		// EnableSearchIndex indexed" (see applyFilterTerm) — it's not a
+		// real column name to normalize/validate at all, so it must pass
+		// through untouched rather than getting normalized to "" and then
+		// dropped as an unknown field.
+		if f.Mode == domains.ModeSearch && f.Field == "" {
+			normalized = append(normalized, f)
+			continue
+		}
 		f.Field = utils.NormalizeColumnName(f.Field)
 		if utils.BunColumnFieldIndex[TData](f.Field) == -1 {
 			c.warn(ctx, fmt.Sprintf("pagination: dropping filter for unknown field %q", f.Field))
