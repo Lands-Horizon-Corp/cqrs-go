@@ -7,9 +7,6 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// resolvePreload applies CQRSImpl.Preloads as the default when no explicit
-// preload list is given, and treats a single empty string as an explicit
-// "load nothing" override of that default.
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) resolvePreload(preload []string) []string {
 	if preload == nil {
 		preload = c.Preloads
@@ -42,6 +39,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) applyPreloads(
 	}
 	return nil
 }
+
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) applyPreloadsMany(
 	ctx context.Context,
 	db bun.IDB,
