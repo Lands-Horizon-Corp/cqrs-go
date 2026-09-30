@@ -43,14 +43,27 @@ services:
   # --- Read side (query DB) -------------------------------------------
   # Whatever consumes the CDC topic (this repo's CQRSImpl.Run, in a real
   # deployment) writes here. No logical-replication settings needed.
+  #
+  # Built (not a plain image) so it also gets pg_duckdb, timescaledb, and
+  # pg_partman on top of pgvector/pgcrypto -- see postgres-read/Dockerfile
+  # for why those three specifically live on the read side. pg_duckdb and
+  # timescaledb both need to be in shared_preload_libraries to actually
+  # activate (verified: pg_duckdb's image sets this to itself alone by
+  # default, and the timescaledb package's postinst doesn't reliably touch
+  # the data directory this entrypoint actually initializes), hence the
+  # explicit -c flag below.
   postgres-read:
-    image: pgvector/pgvector:pg16
+    build: ./postgres-read
     container_name: cqrs-postgres-read
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: cqrs_read
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_duckdb,timescaledb
     ports:
       - "15434:5432"
     volumes:

@@ -76,6 +76,14 @@ type (
 		PageSize int              `query:"pageSize" default:"10"`
 		Cursor   *string          `query:"cursor"`
 	}
+
+	PaginationResult[T any] struct {
+		Data      []*T `json:"data"`
+		TotalSize int  `json:"totalSize"`
+		TotalPage int  `json:"totalPage"`
+		PageIndex int  `json:"pageIndex"`
+		PageSize  int  `json:"pageSize"`
+	}
 )
 
 func (p *Pagination) Parse(ctx *app.RequestContext) error {

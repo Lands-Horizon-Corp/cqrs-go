@@ -17,7 +17,6 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Create(
 			return nil, fmt.Errorf("validating request payload: %w", err)
 		}
 	}
-
 	_, err := c.WriteSQLService.Client().NewInsert().
 		Model(&data).
 		Returning("*").
