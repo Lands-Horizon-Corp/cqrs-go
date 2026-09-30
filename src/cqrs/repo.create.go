@@ -58,10 +58,8 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) CreateMany(
 	if err != nil {
 		return nil, fmt.Errorf("bulk inserting records: %w", err)
 	}
-	for i := range data {
-		if err := c.applyPreloads(ctx, c.WriteSQLService.Client(), &data[i], preload...); err != nil {
-			return nil, fmt.Errorf("loading preloads for record at index %d: %w", i, err)
-		}
+	if err := c.applyPreloadsMany(ctx, c.WriteSQLService.Client(), &data, preload...); err != nil {
+		return nil, fmt.Errorf("loading preloads: %w", err)
 	}
 
 	if c.ToResource == nil {
@@ -126,10 +124,8 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) CreateManyWithTx(
 	if err != nil {
 		return nil, fmt.Errorf("bulk inserting records in tx: %w", err)
 	}
-	for i := range data {
-		if err := c.applyPreloads(ctx, tx, &data[i], preload...); err != nil {
-			return nil, fmt.Errorf("loading preloads for record at index %d: %w", i, err)
-		}
+	if err := c.applyPreloadsMany(ctx, tx, &data, preload...); err != nil {
+		return nil, fmt.Errorf("loading preloads: %w", err)
 	}
 	if c.ToResource == nil {
 		return nil, nil

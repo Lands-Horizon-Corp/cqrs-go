@@ -40,12 +40,6 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateByID(
 	return nil, nil
 }
 
-// UpdateMany bulk-updates every row in data in a single statement, matched
-// by primary key (bun's Bulk() update: an UPDATE ... FROM VALUES(...)
-// joined back to the table by PK). Unlike UpdateByID, it does not report
-// which IDs (if any) didn't exist — consistent with DeleteMany, which has
-// the same silent-no-op-for-missing-IDs behavior for the same reason: a
-// bulk statement doesn't get an individual not-found signal per row.
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateMany(
 	ctx context.Context,
 	data []TData,
@@ -69,10 +63,8 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateMany(
 	if err != nil {
 		return nil, fmt.Errorf("bulk updating records: %w", err)
 	}
-	for i := range data {
-		if err := c.applyPreloads(ctx, c.WriteSQLService.Client(), &data[i], preload...); err != nil {
-			return nil, fmt.Errorf("loading preloads for record at index %d: %w", i, err)
-		}
+	if err := c.applyPreloadsMany(ctx, c.WriteSQLService.Client(), &data, preload...); err != nil {
+		return nil, fmt.Errorf("loading preloads: %w", err)
 	}
 
 	if c.ToResource == nil {
@@ -112,10 +104,8 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) UpdateManyWithTx(
 	if err != nil {
 		return nil, fmt.Errorf("bulk updating records in tx: %w", err)
 	}
-	for i := range data {
-		if err := c.applyPreloads(ctx, tx, &data[i], preload...); err != nil {
-			return nil, fmt.Errorf("loading preloads for record at index %d: %w", i, err)
-		}
+	if err := c.applyPreloadsMany(ctx, tx, &data, preload...); err != nil {
+		return nil, fmt.Errorf("loading preloads: %w", err)
 	}
 
 	if c.ToResource == nil {
