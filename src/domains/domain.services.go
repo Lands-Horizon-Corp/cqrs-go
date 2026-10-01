@@ -14,6 +14,7 @@ type LogService interface {
 	Warn(ctx context.Context, message string)
 	Panic(ctx context.Context, message string)
 	Success(ctx context.Context, message string)
+	Fatal(ctx context.Context, message string)
 }
 
 type BroadcastService interface {

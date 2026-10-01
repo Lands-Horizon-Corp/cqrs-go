@@ -132,6 +132,7 @@ func (f *fakeLogService) Error(_ context.Context, msg string)   { f.record("erro
 func (f *fakeLogService) Warn(_ context.Context, msg string)    { f.record("warn", msg) }
 func (f *fakeLogService) Panic(_ context.Context, msg string)   { f.record("panic", msg) }
 func (f *fakeLogService) Success(_ context.Context, msg string) { f.record("success", msg) }
+func (f *fakeLogService) Fatal(_ context.Context, msg string)   { f.record("fatal", msg) }
 
 func (f *fakeLogService) snapshot() []logCall {
 	f.mu.Lock()
