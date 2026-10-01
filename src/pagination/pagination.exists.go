@@ -13,10 +13,10 @@ import (
 // same "how many rows would Filter(ctx, filter) have returned" question
 // Count answers, but as a single boolean rather than a row count, and
 // without ever scanning a row back. A zero-value domains.StructuredFilter{}
-// asks "does this table have any rows at all". It shares
-// normalizeFilters/applyFilters with Filter/Count/paginate, so a field
-// accepted (or silently dropped) by one is accepted (or dropped) by the
-// other identically.
+// asks "does this table have any rows at all". filter is treated the same
+// trusted/hardcoded way Filter/FilterWithTx/Count treat theirs: an unknown
+// field in it is a real error, not something normalizeFilters would
+// silently drop.
 func (c *PaginationService[TData, TID]) Exists(
 	ctx context.Context, filter domains.StructuredFilter,
 ) (bool, error) {
@@ -40,15 +40,13 @@ func (c *PaginationService[TData, TID]) ExistsWithTx(
 	return c.exists(ctx, tx, filter)
 }
 
-// exists applies filter's normalized Filters to an EXISTS query against db
-// — bun's SelectQuery.Exists, not a COUNT(*): the dialect generates a
+// exists applies filter to an EXISTS query against db — bun's
+// SelectQuery.Exists, not a COUNT(*): the dialect generates a
 // short-circuiting "SELECT EXISTS(...)" (or equivalent) that stops at the
 // first match instead of visiting every matching row the way Count does.
 func (c *PaginationService[TData, TID]) exists(
 	ctx context.Context, db bun.IDB, filter domains.StructuredFilter,
 ) (bool, error) {
-	filter.Filters = c.normalizeFilters(ctx, filter.Filters)
-
 	var data []TData
 	q := db.NewSelect().Model(&data)
 	q, err := c.applyFilters(q, filter)

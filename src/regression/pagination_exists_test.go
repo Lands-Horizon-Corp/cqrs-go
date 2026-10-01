@@ -75,23 +75,21 @@ func TestPaginationExists_HappyPath_MatchesWhetherFilterFindsAnyRow(t *testing.T
 	}
 }
 
-// TestPaginationExists_HappyPath_UnknownFilterFieldIsDroppedNotAnError mirrors
-// TestPaginationCount_HappyPath_UnknownFilterFieldIsDroppedNotAnError: Exists
-// shares normalizeFilters with Filter/Count/paginate, so an unknown
-// frontend-supplied field is dropped with a warning, not rejected.
-func TestPaginationExists_HappyPath_UnknownFilterFieldIsDroppedNotAnError(t *testing.T) {
+// TestPaginationExists_SadPath_UnknownFilterFieldErrorsRatherThanDropping
+// mirrors TestPaginationCount_SadPath_UnknownFilterFieldErrorsRatherThanDropping:
+// Exists' filter argument is treated the same trusted/hardcoded way
+// Filter/FilterWithTx/Count treat theirs, so an unknown field in it is a
+// real error, not something to drop.
+func TestPaginationExists_SadPath_UnknownFilterFieldErrorsRatherThanDropping(t *testing.T) {
 	t.Parallel()
 	c, read := newPaginationQueryTestCQRS(t)
 	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha"})
 
-	got, err := c.Exists(context.Background(), domains.StructuredFilter{
+	_, err := c.Exists(context.Background(), domains.StructuredFilter{
 		Filters: []domains.Filter{{Field: "not_a_real_column", Mode: domains.ModeEqual, Value: "x"}},
 	})
-	if err != nil {
-		t.Fatalf("expected the unknown filter field to be dropped rather than error, got: %v", err)
-	}
-	if !got {
-		t.Fatal("expected true (unknown filter ignored, w1 still exists), got false")
+	if err == nil {
+		t.Fatal("expected an error for an unknown field in Exists' filter, got nil")
 	}
 }
 

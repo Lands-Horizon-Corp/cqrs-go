@@ -12,9 +12,11 @@ import (
 // Count returns the number of rows in TData's table matching filter — "how
 // many rows would Filter(ctx, filter) have returned", without scanning any
 // of them back. A zero-value domains.StructuredFilter{} counts every row.
-// It shares normalizeFilters/applyFilters with Filter/paginate, so a field
-// accepted (or silently dropped) by one is accepted (or dropped) by the
-// other identically.
+// filter is treated the same trusted/hardcoded way Filter/FilterWithTx
+// treat theirs (see paginate's doc comment): an unknown field in it is a
+// real error, not something normalizeFilters would silently drop — there's
+// no separate frontend-supplied filter parameter here for that leniency to
+// apply to.
 func (c *PaginationService[TData, TID]) Count(
 	ctx context.Context, filter domains.StructuredFilter,
 ) (int64, error) {
@@ -38,15 +40,12 @@ func (c *PaginationService[TData, TID]) CountWithTx(
 	return c.count(ctx, tx, filter)
 }
 
-// count applies filter's normalized Filters to a COUNT(*) query against db
-// — the counting equivalent of paginate, minus everything cursor/sort/
-// preload-related that only matters once actual rows are being scanned
-// back.
+// count applies filter to a COUNT(*) query against db — the counting
+// equivalent of paginate, minus everything cursor/sort/preload-related that
+// only matters once actual rows are being scanned back.
 func (c *PaginationService[TData, TID]) count(
 	ctx context.Context, db bun.IDB, filter domains.StructuredFilter,
 ) (int64, error) {
-	filter.Filters = c.normalizeFilters(ctx, filter.Filters)
-
 	var data []TData
 	q := db.NewSelect().Model(&data)
 	q, err := c.applyFilters(q, filter)
