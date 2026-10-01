@@ -3,6 +3,7 @@ package pagination
 import (
 	"context"
 
+	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/uptrace/bun"
 
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
@@ -77,4 +78,41 @@ func (c *PaginationService[TData, TID]) FilterWithTx(
 		return nil, err
 	}
 	return result.Data, nil
+}
+
+// PaginateWithHertz is PaginateFilter run against a caller-supplied *bun.Tx
+// (the same shape as FilterWithTx), except the domains.Pagination half
+// (Filter/SortFields/PageSize/Cursor) is parsed directly off the incoming
+// Hertz request via domains.Pagination.Parse — the "?filter=...&sort=...
+// &pageSize=...&cursor=..." query string a frontend actually sends —
+// instead of requiring the caller to have already parsed one. filter stays
+// a separate parameter the same reason it is everywhere else in this file:
+// it's typically backend-hardcoded (tenant scoping, ...) and must apply
+// unconditionally alongside whatever the request's own filter says, never
+// overriding it (see PaginateFilter's doc comment for the AND-merge).
+//
+// domains.Pagination.Parse already is this project's Hertz equivalent of
+// an older project's echo-based parseFilters/parseSort/parseQuery:
+// Query("filter")/Query("sort") go through the same unescape -> base64
+// decode -> JSON unmarshal chain (utils.DecodeQueryParam, generic instead
+// of duplicated per type), and PageSize/Cursor are populated by Hertz's
+// own ctx.BindAndValidate against domains.Pagination's `query:"..."`
+// struct tags rather than hand-written parsePageSize/parsePageIndex
+// functions — there's no pageIndex/offset concept here at all, since this
+// whole system is keyset/cursor-based pagination, not offset-based.
+func (c *PaginationService[TData, TID]) PaginateWithHertz(
+	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter, reqCtx *app.RequestContext,
+) (domains.PaginationResult[TData], error) {
+	if err := c.checkReady(); err != nil {
+		return domains.PaginationResult[TData]{}, err
+	}
+	var pagination domains.Pagination
+	if err := pagination.Parse(reqCtx); err != nil {
+		return domains.PaginationResult[TData]{}, err
+	}
+	result, err := c.paginate(ctx, tx, filter, pagination)
+	if err != nil {
+		return domains.PaginationResult[TData]{}, err
+	}
+	return *result, nil
 }

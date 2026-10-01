@@ -18,6 +18,15 @@ import (
 // the assertion is that a specific named event actually arrives over that
 // live connection — not that BroadcastService.Broadcast was called
 // in-process, which the fake-backed tests elsewhere already cover.
+//
+// waitForEvent's timeout is 30s, not something tighter: this is a genuine
+// end-to-end round trip (Kafka publish -> Run's Subscribe handler -> outbox
+// batcher -> apply to read db -> Dispatch -> real sockudo -> real
+// WebSocket), and under `make test-integration`'s full parallel run all
+// ~34 integration tests share that same Kafka/Connect/sockudo stack —
+// observed directly: TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Updated
+// timed out at 15s once under that full-suite load despite passing
+// reliably alone, while the underlying pipeline itself showed no bug.
 
 func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Created(t *testing.T) {
 	t.Parallel()
@@ -43,7 +52,7 @@ func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Created(t *te
 		t.Fatalf("publishing to real kafka: %v", err)
 	}
 
-	msg := sub.waitForEvent(t, "widget.created", 15*time.Second)
+	msg := sub.waitForEvent(t, "widget.created", 30*time.Second)
 	if msg.Channel != topic {
 		t.Errorf("expected event on channel %q, got %q", topic, msg.Channel)
 	}
@@ -86,7 +95,7 @@ func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Updated(t *te
 	if err := broker.Publish(ctx, topic, []byte(seed.ID), seedEnvelope); err != nil {
 		t.Fatalf("publishing seed to real kafka: %v", err)
 	}
-	sub.waitForEvent(t, "widget.created", 15*time.Second) // drain the seed broadcast
+	sub.waitForEvent(t, "widget.created", 30*time.Second) // drain the seed broadcast
 
 	updated := widget{ID: "w1", Name: "new"}
 	if _, err := c.UpdateByIDFormat(ctx, "w1", updated); err != nil {
@@ -102,7 +111,7 @@ func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Updated(t *te
 		t.Fatalf("publishing update to real kafka: %v", err)
 	}
 
-	msg := sub.waitForEvent(t, "widget.updated", 15*time.Second)
+	msg := sub.waitForEvent(t, "widget.updated", 30*time.Second)
 	var got widgetResource
 	if err := json.Unmarshal([]byte(msg.Data), &got); err != nil {
 		t.Fatalf("decoding broadcast payload: %v", err)
@@ -142,7 +151,7 @@ func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Deleted(t *te
 	if err := broker.Publish(ctx, topic, []byte(seed.ID), seedEnvelope); err != nil {
 		t.Fatalf("publishing seed to real kafka: %v", err)
 	}
-	sub.waitForEvent(t, "widget.created", 15*time.Second) // drain the seed broadcast
+	sub.waitForEvent(t, "widget.created", 30*time.Second) // drain the seed broadcast
 
 	if err := c.DeleteByID(ctx, "w1"); err != nil {
 		t.Fatalf("DeleteByID returned error: %v", err)
@@ -157,7 +166,7 @@ func TestIntegration_HappyPath_RealBroadcastDeliveredOverWebSocket_Deleted(t *te
 		t.Fatalf("publishing delete to real kafka: %v", err)
 	}
 
-	msg := sub.waitForEvent(t, "widget.deleted", 15*time.Second)
+	msg := sub.waitForEvent(t, "widget.deleted", 30*time.Second)
 	var got widgetResource
 	if err := json.Unmarshal([]byte(msg.Data), &got); err != nil {
 		t.Fatalf("decoding broadcast payload: %v", err)

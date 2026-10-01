@@ -246,3 +246,95 @@ func TestPagination_SadPath_FilterWithTxReturnsErrorWhenColumnDefaultIDIsEmpty(t
 		t.Fatal("expected an error for an empty ColumnDefaultID, got nil")
 	}
 }
+
+// TestPagination_HappyPath_PaginateWithHertzCombinesHardcodedFilterWithParsedRequest
+// is PaginateWithHertz's own AND-merge proof: filter (hardcoded) and the
+// request's own "?filter=..." query param (parsed via domains.Pagination.Parse,
+// the same helper pagination_test.go's own Parse tests use) must both
+// apply, neither overriding the other — same guarantee as PaginateFilter,
+// just sourcing the frontend half from a real Hertz request instead of a
+// pre-parsed domains.Pagination argument.
+func TestPagination_HappyPath_PaginateWithHertzCombinesHardcodedFilterWithParsedRequest(t *testing.T) {
+	t.Parallel()
+	c, read := asPaginationServiceInterface(t)
+	ctx := context.Background()
+	seedWidgets(t, read,
+		widget{ID: "w1", Name: "Alpha", Priority: new(1)},
+		widget{ID: "w2", Name: "Alpha", Priority: new(2)},
+		widget{ID: "w3", Name: "Beta", Priority: new(1)},
+	)
+
+	// Request's own filter: priority = 1. Hardcoded filter below: name =
+	// "Alpha". Only w1 satisfies both.
+	reqFilter := domains.StructuredFilter{Filters: []domains.Filter{
+		{Field: "priority", Mode: domains.ModeEqual, Value: float64(1)},
+	}}
+	reqCtx := newPaginationTestContext(t, map[string]string{"filter": encodeQueryParam(t, reqFilter)})
+
+	tx, err := read.Client().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx returned error: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := c.PaginateWithHertz(ctx, &tx,
+		domains.StructuredFilter{Filters: []domains.Filter{{Field: "name", Mode: domains.ModeEqual, Value: "Alpha"}}},
+		reqCtx,
+	)
+	if err != nil {
+		t.Fatalf("PaginateWithHertz returned error: %v", err)
+	}
+	if len(result.Data) != 1 || result.Data[0].ID != "w1" {
+		t.Fatalf("expected only [w1] (name=Alpha AND priority=1), got %+v", result.Data)
+	}
+}
+
+// TestPagination_HappyPath_PaginateWithHertzUsesRequestPageSizeAndCursor
+// confirms the PageSize/Cursor half of the request is honored too, not
+// just the filter — proving the whole domains.Pagination (not only
+// Filter) is what gets parsed off reqCtx.
+func TestPagination_HappyPath_PaginateWithHertzUsesRequestPageSizeAndCursor(t *testing.T) {
+	t.Parallel()
+	c, read := asPaginationServiceInterface(t)
+	ctx := context.Background()
+	seedWidgets(t, read,
+		widget{ID: "w1", Name: "Alpha"},
+		widget{ID: "w2", Name: "Beta"},
+		widget{ID: "w3", Name: "Gamma"},
+	)
+
+	tx, err := read.Client().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx returned error: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	reqCtx := newPaginationTestContext(t, map[string]string{"pageSize": "1"})
+	result, err := c.PaginateWithHertz(ctx, &tx, domains.StructuredFilter{}, reqCtx)
+	if err != nil {
+		t.Fatalf("PaginateWithHertz returned error: %v", err)
+	}
+	if len(result.Data) != 1 {
+		t.Fatalf("expected the request's pageSize=1 to be honored, got %+v", result.Data)
+	}
+	if result.NextCursor == nil {
+		t.Fatal("expected a NextCursor given 3 rows and pageSize=1")
+	}
+}
+
+func TestPagination_SadPath_PaginateWithHertzReturnsErrorForMalformedFilterParam(t *testing.T) {
+	t.Parallel()
+	c, read := asPaginationServiceInterface(t)
+	ctx := context.Background()
+
+	tx, err := read.Client().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx returned error: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	reqCtx := newPaginationTestContext(t, map[string]string{"filter": "not-valid-base64!!!"})
+	if _, err := c.PaginateWithHertz(ctx, &tx, domains.StructuredFilter{}, reqCtx); err == nil {
+		t.Fatal("expected an error for a malformed filter query param, got nil")
+	}
+}

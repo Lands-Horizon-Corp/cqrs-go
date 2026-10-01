@@ -3,6 +3,7 @@ package cqrs
 import (
 	"context"
 
+	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/uptrace/bun"
 
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
@@ -74,4 +75,24 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FilterWithTxFormat(
 		return nil, err
 	}
 	return c.ToModels(data), nil
+}
+
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) PaginateWithHertz(
+	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter, reqCtx *app.RequestContext) (domains.PaginationResult[TData], error) {
+	return c.paginationService.PaginateWithHertz(ctx, tx, filter, reqCtx)
+}
+
+func (c *CQRSImpl[TData, TResponse, TRequest, TID]) PaginateWithHertzFormat(
+	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter, reqCtx *app.RequestContext) (domains.PaginationResult[TResponse], error) {
+	paginationResult, err := c.paginationService.PaginateWithHertz(ctx, tx, filter, reqCtx)
+	if err != nil {
+		return domains.PaginationResult[TResponse]{}, err
+	}
+	return domains.PaginationResult[TResponse]{
+		Data:           c.ToModels(paginationResult.Data),
+		CurrentCursor:  paginationResult.CurrentCursor,
+		NextCursor:     paginationResult.NextCursor,
+		PreviousCursor: paginationResult.PreviousCursor,
+		PageSize:       paginationResult.PageSize,
+	}, nil
 }

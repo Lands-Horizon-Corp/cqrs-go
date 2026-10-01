@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/uptrace/bun"
 )
 
@@ -38,4 +39,10 @@ type PaginationService[TData any, TID comparable] interface {
 
 	Filter(ctx context.Context, filter StructuredFilter) ([]*TData, error)
 	FilterWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter) ([]*TData, error)
+
+	// PaginateWithHertz is PaginateFilter against a *bun.Tx, with the
+	// domains.Pagination half parsed directly off a Hertz request (see
+	// Pagination.Parse) instead of requiring the caller to have already
+	// parsed one.
+	PaginateWithHertz(ctx context.Context, tx *bun.Tx, filter StructuredFilter, reqCtx *app.RequestContext) (PaginationResult[TData], error)
 }
