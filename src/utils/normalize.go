@@ -9,6 +9,7 @@ import (
 var (
 	columnNameInvalidChars = regexp.MustCompile(`[^a-z_]+`)
 	columnNameRepeatedSep  = regexp.MustCompile(`_+`)
+	pascalCaseWordSep      = regexp.MustCompile(`[^A-Za-z0-9]+`)
 )
 
 // NormalizeColumnName turns arbitrary client-supplied column-name input
@@ -29,6 +30,45 @@ func NormalizeColumnName(name string) string {
 	name = columnNameInvalidChars.ReplaceAllString(name, "_")
 	name = columnNameRepeatedSep.ReplaceAllString(name, "_")
 	return strings.Trim(name, "_")
+}
+
+// ToPascalCase turns arbitrary client-supplied relation-name input (a
+// preload path segment, typically) into the PascalCase form a bun struct
+// field name — and therefore a bun `rel:...` relation name — actually
+// takes, the same way NormalizeColumnName does for snake_case column
+// names:
+//   - the string is split on any run of non-alphanumeric characters
+//     (underscore, hyphen, space, ...), each resulting word's first letter
+//     is uppercased, and the words are joined back with no separator:
+//     "author_posts" / "author-posts" / "author posts" -> "AuthorPosts"
+//   - a word that arrived with no separator at all is left otherwise
+//     untouched beyond its first letter, so an already-PascalCase or
+//     camelCase input's internal capitalization survives intact instead of
+//     being flattened: "authorPosts" -> "AuthorPosts" (the inner "P" is
+//     preserved, not lowercased first and re-capitalized), and
+//     "AuthorPosts" is unchanged
+//
+// Unlike NormalizeColumnName, this never lowercases: bun relation names are
+// case-sensitive Go exported field names, not case-insensitive SQL
+// identifiers, so collapsing case here would make a correctly-cased
+// relation unresolvable instead of fixing an incorrectly-cased one.
+func ToPascalCase(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	words := pascalCaseWordSep.Split(s, -1)
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, w := range words {
+		if w == "" {
+			continue
+		}
+		r := []rune(w)
+		b.WriteRune(unicode.ToUpper(r[0]))
+		b.WriteString(string(r[1:]))
+	}
+	return b.String()
 }
 
 // camelToSnake inserts an underscore at each camelCase/PascalCase word

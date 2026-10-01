@@ -187,7 +187,11 @@ func (c *PaginationService[TData, TID]) paginate(
 		}
 	}
 
-	if err := utils.ApplyPreloadsMany(ctx, db, &data, c.Preloads, preloads...); err != nil {
+	droppedPreloads, err := utils.ApplyPreloadsMany(ctx, db, &data, c.Preloads, preloads...)
+	for _, d := range droppedPreloads {
+		c.warn(ctx, fmt.Sprintf("pagination: dropping unknown preload relation %q", d))
+	}
+	if err != nil {
 		return nil, fmt.Errorf("loading preloads: %w", err)
 	}
 

@@ -531,7 +531,12 @@ func TestPagination_SadPath_CursorFromDifferentSortShapeIsRejected(t *testing.T)
 	}
 }
 
-func TestPagination_SadPath_UnknownPreloadRelationReturnsError(t *testing.T) {
+// TestPagination_HappyPath_UnknownPreloadRelationIsDroppedNotAnError mirrors
+// preload_test.go's own unknown-relation tests: an unknown preload relation
+// name is dropped with a warning rather than failing the whole page, the
+// same "stale preload shouldn't take production down" reasoning the cqrs
+// package's own applyPreloads/applyPreloadsMany already document.
+func TestPagination_HappyPath_UnknownPreloadRelationIsDroppedNotAnError(t *testing.T) {
 	t.Parallel()
 	c, db := newPreloadTestCQRS(t)
 	ctx := context.Background()
@@ -544,9 +549,12 @@ func TestPagination_SadPath_UnknownPreloadRelationReturnsError(t *testing.T) {
 		ReadSQLService: &fakeSQLService{db: db},
 	})
 
-	_, err := pc.Pagination(ctx, domains.Pagination{}, "NotARealRelation")
-	if err == nil {
-		t.Fatal("expected an error for an unknown preload relation, got nil")
+	result, err := pc.Pagination(ctx, domains.Pagination{}, "NotARealRelation")
+	if err != nil {
+		t.Fatalf("expected the unknown preload relation to be dropped rather than error, got: %v", err)
+	}
+	if len(result.Data) != 1 || result.Data[0].Author != nil {
+		t.Fatalf("expected the row back with Author not loaded, got %+v", result.Data)
 	}
 }
 

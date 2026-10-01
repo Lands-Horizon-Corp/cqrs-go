@@ -160,15 +160,24 @@ func TestPreload_HappyPath_UpdateByIDWithExplicitPreloadLoadsRelation(t *testing
 	}
 }
 
-func TestPreload_SadPath_UnknownRelationNameReturnsError(t *testing.T) {
+// TestPreload_HappyPath_UnknownRelationNameIsDroppedNotAnError documents the
+// current, deliberate behavior: an unknown preload relation name (a typo,
+// or one that was renamed/removed from the model since the caller was
+// written) is dropped with a warning rather than failing the whole
+// operation — a stale preload shouldn't be able to take a read down in
+// production just because a model changed shape elsewhere.
+func TestPreload_HappyPath_UnknownRelationNameIsDroppedNotAnError(t *testing.T) {
 	t.Parallel()
 	c, db := newPreloadTestCQRS(t)
 	ctx := context.Background()
 	seedPreloadAuthor(t, db, "a1", "Ada")
 
-	_, err := c.CreateFormat(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"}, "NotARealRelation")
-	if err == nil {
-		t.Fatal("expected an error for an unknown relation name, got nil")
+	res, err := c.CreateFormat(ctx, preloadPost{ID: "p1", Title: "Hello", AuthorID: "a1"}, "NotARealRelation")
+	if err != nil {
+		t.Fatalf("expected the unknown relation to be dropped rather than error, got: %v", err)
+	}
+	if res.AuthorName != "" {
+		t.Errorf("expected Author not to be loaded (the only preload given was unknown), got %q", res.AuthorName)
 	}
 }
 
@@ -191,14 +200,17 @@ func TestPreload_HappyPath_CreateManyLoadsRelationForEveryRecord(t *testing.T) {
 	}
 }
 
-func TestPreload_SadPath_CreateManyUnknownRelationReturnsError(t *testing.T) {
+func TestPreload_HappyPath_CreateManyUnknownRelationIsDroppedNotAnError(t *testing.T) {
 	t.Parallel()
 	c, db := newPreloadTestCQRS(t)
 	seedPreloadAuthor(t, db, "a1", "Ada")
 
-	_, err := c.CreateManyFormat(context.Background(), []preloadPost{{ID: "p1", Title: "One", AuthorID: "a1"}}, "NotARealRelation")
-	if err == nil {
-		t.Fatal("expected an error for an unknown relation name, got nil")
+	res, err := c.CreateManyFormat(context.Background(), []preloadPost{{ID: "p1", Title: "One", AuthorID: "a1"}}, "NotARealRelation")
+	if err != nil {
+		t.Fatalf("expected the unknown relation to be dropped rather than error, got: %v", err)
+	}
+	if len(res) != 1 || res[0].AuthorName != "" {
+		t.Fatalf("expected Author not to be loaded, got %+v", res)
 	}
 }
 
@@ -248,17 +260,23 @@ func TestPreload_HappyPath_WithTxVariantsLoadRelations(t *testing.T) {
 	}
 }
 
-func TestPreload_SadPath_WithTxVariantsUnknownRelationReturnsError(t *testing.T) {
+func TestPreload_HappyPath_WithTxVariantsUnknownRelationIsDroppedNotAnError(t *testing.T) {
 	t.Parallel()
 	c, db := newPreloadTestCQRS(t)
 	seedPreloadAuthor(t, db, "a1", "Ada")
 
 	err := db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := c.CreateWithTxFormat(ctx, tx, preloadPost{ID: "p1", Title: "One", AuthorID: "a1"}, "NotARealRelation"); err == nil {
-			t.Error("CreateWithTx: expected an error for an unknown relation name, got nil")
+		one, err := c.CreateWithTxFormat(ctx, tx, preloadPost{ID: "p1", Title: "One", AuthorID: "a1"}, "NotARealRelation")
+		if err != nil {
+			t.Errorf("CreateWithTx: expected the unknown relation to be dropped rather than error, got: %v", err)
+		} else if one.AuthorName != "" {
+			t.Errorf("CreateWithTx: expected Author not to be loaded, got %q", one.AuthorName)
 		}
-		if _, err := c.CreateManyWithTxFormat(ctx, tx, []preloadPost{{ID: "p2", Title: "Two", AuthorID: "a1"}}, "NotARealRelation"); err == nil {
-			t.Error("CreateManyWithTx: expected an error for an unknown relation name, got nil")
+		many, err := c.CreateManyWithTxFormat(ctx, tx, []preloadPost{{ID: "p2", Title: "Two", AuthorID: "a1"}}, "NotARealRelation")
+		if err != nil {
+			t.Errorf("CreateManyWithTx: expected the unknown relation to be dropped rather than error, got: %v", err)
+		} else if len(many) != 1 || many[0].AuthorName != "" {
+			t.Errorf("CreateManyWithTx: expected Author not to be loaded, got %+v", many)
 		}
 		return nil
 	})
@@ -292,7 +310,7 @@ func TestPreload_HappyPath_UpdateManyLoadsRelationForEveryRecord(t *testing.T) {
 	}
 }
 
-func TestPreload_SadPath_UpdateWithTxVariantsUnknownRelationReturnsError(t *testing.T) {
+func TestPreload_HappyPath_UpdateWithTxVariantsUnknownRelationIsDroppedNotAnError(t *testing.T) {
 	t.Parallel()
 	c, db := newPreloadTestCQRS(t)
 	ctx := context.Background()
@@ -302,11 +320,17 @@ func TestPreload_SadPath_UpdateWithTxVariantsUnknownRelationReturnsError(t *test
 	}
 
 	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := c.UpdateByIDWithTxFormat(ctx, tx, "p1", preloadPost{ID: "p1", Title: "Updated", AuthorID: "a1"}, "NotARealRelation"); err == nil {
-			t.Error("UpdateByIDWithTx: expected an error for an unknown relation name, got nil")
+		one, err := c.UpdateByIDWithTxFormat(ctx, tx, "p1", preloadPost{ID: "p1", Title: "Updated", AuthorID: "a1"}, "NotARealRelation")
+		if err != nil {
+			t.Errorf("UpdateByIDWithTx: expected the unknown relation to be dropped rather than error, got: %v", err)
+		} else if one.AuthorName != "" {
+			t.Errorf("UpdateByIDWithTx: expected Author not to be loaded, got %q", one.AuthorName)
 		}
-		if _, err := c.UpdateManyWithTxFormat(ctx, tx, []preloadPost{{ID: "p1", Title: "Updated", AuthorID: "a1"}}, "NotARealRelation"); err == nil {
-			t.Error("UpdateManyWithTx: expected an error for an unknown relation name, got nil")
+		many, err := c.UpdateManyWithTxFormat(ctx, tx, []preloadPost{{ID: "p1", Title: "Updated", AuthorID: "a1"}}, "NotARealRelation")
+		if err != nil {
+			t.Errorf("UpdateManyWithTx: expected the unknown relation to be dropped rather than error, got: %v", err)
+		} else if len(many) != 1 || many[0].AuthorName != "" {
+			t.Errorf("UpdateManyWithTx: expected Author not to be loaded, got %+v", many)
 		}
 		return nil
 	})
@@ -315,7 +339,7 @@ func TestPreload_SadPath_UpdateWithTxVariantsUnknownRelationReturnsError(t *test
 	}
 }
 
-func TestPreload_SadPath_UpdateByIDAndUpdateManyUnknownRelationReturnsError(t *testing.T) {
+func TestPreload_HappyPath_UpdateByIDAndUpdateManyUnknownRelationIsDroppedNotAnError(t *testing.T) {
 	t.Parallel()
 	c, db := newPreloadTestCQRS(t)
 	ctx := context.Background()
@@ -324,10 +348,16 @@ func TestPreload_SadPath_UpdateByIDAndUpdateManyUnknownRelationReturnsError(t *t
 		t.Fatalf("seed Create returned error: %v", err)
 	}
 
-	if _, err := c.UpdateByIDFormat(ctx, "p1", preloadPost{ID: "p1", Title: "Updated", AuthorID: "a1"}, "NotARealRelation"); err == nil {
-		t.Error("UpdateByID: expected an error for an unknown relation name, got nil")
+	one, err := c.UpdateByIDFormat(ctx, "p1", preloadPost{ID: "p1", Title: "Updated", AuthorID: "a1"}, "NotARealRelation")
+	if err != nil {
+		t.Errorf("UpdateByID: expected the unknown relation to be dropped rather than error, got: %v", err)
+	} else if one.AuthorName != "" {
+		t.Errorf("UpdateByID: expected Author not to be loaded, got %q", one.AuthorName)
 	}
-	if _, err := c.UpdateManyFormat(ctx, []preloadPost{{ID: "p1", Title: "Updated", AuthorID: "a1"}}, "NotARealRelation"); err == nil {
-		t.Error("UpdateMany: expected an error for an unknown relation name, got nil")
+	many, err := c.UpdateManyFormat(ctx, []preloadPost{{ID: "p1", Title: "Updated", AuthorID: "a1"}}, "NotARealRelation")
+	if err != nil {
+		t.Errorf("UpdateMany: expected the unknown relation to be dropped rather than error, got: %v", err)
+	} else if len(many) != 1 || many[0].AuthorName != "" {
+		t.Errorf("UpdateMany: expected Author not to be loaded, got %+v", many)
 	}
 }
