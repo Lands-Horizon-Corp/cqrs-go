@@ -60,10 +60,15 @@ func (c *PaginationService[TData, TID]) Filter(
 	return result.Data, nil
 }
 
-// FilterWithTx is Filter run against a caller-supplied *bun.Tx instead of
-// ReadSQLService's own client — e.g. reading back rows written earlier in
-// the same transaction, before it commits and becomes visible through a
-// separate connection. It's just a filter, the same way Filter is — no
+// FilterWithTx is Filter run against a caller-supplied *bun.Tx instead of a
+// plain client. That tx is expected to have been begun on WriteSQLService
+// (the writer), not ReadSQLService: a transaction only shows its own
+// uncommitted work to callers sharing that same connection, and in a real
+// deployment ReadSQLService may point at a replica that doesn't even share
+// the writer's connection, let alone an open transaction on it — e.g.
+// reading back rows written earlier in the same transaction, before it
+// commits and becomes visible through a separate connection. It's just a
+// filter, the same way Filter is — no
 // pagination parameter and no PaginationResult wrapper, since a
 // transactional read-your-writes lookup like this has no frontend request
 // behind it to carry page size/cursor for.

@@ -26,11 +26,12 @@ func (c *PaginationService[TData, TID]) Count(
 	return c.count(ctx, c.ReadSQLService.Client(), filter)
 }
 
-// CountWithTx is Count run against a caller-supplied *bun.Tx instead of
-// ReadSQLService's own client — e.g. counting rows written earlier in the
+// CountWithTx is Count run against a caller-supplied *bun.Tx instead of a
+// plain client. That tx is expected to come from WriteSQLService (the
+// writer), not ReadSQLService — see FilterWithTx's doc comment in
+// pagination.service.go for why — e.g. counting rows written earlier in the
 // same transaction, before it commits and becomes visible through a
-// separate connection (see FilterWithTx's doc comment for why this shape
-// exists alongside the plain version).
+// separate connection.
 func (c *PaginationService[TData, TID]) CountWithTx(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter,
 ) (int64, error) {

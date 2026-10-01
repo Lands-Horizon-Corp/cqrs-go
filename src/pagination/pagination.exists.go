@@ -26,11 +26,12 @@ func (c *PaginationService[TData, TID]) Exists(
 	return c.exists(ctx, c.ReadSQLService.Client(), filter)
 }
 
-// ExistsWithTx is Exists run against a caller-supplied *bun.Tx instead of
-// ReadSQLService's own client — e.g. checking for a row written earlier in
-// the same transaction, before it commits and becomes visible through a
-// separate connection (see FilterWithTx's doc comment for why this shape
-// exists alongside the plain version).
+// ExistsWithTx is Exists run against a caller-supplied *bun.Tx instead of a
+// plain client. That tx is expected to come from WriteSQLService (the
+// writer), not ReadSQLService — see FilterWithTx's doc comment in
+// pagination.service.go for why — e.g. checking for a row written earlier
+// in the same transaction, before it commits and becomes visible through a
+// separate connection.
 func (c *PaginationService[TData, TID]) ExistsWithTx(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter,
 ) (bool, error) {

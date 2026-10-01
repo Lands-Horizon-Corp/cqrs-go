@@ -1,102 +1,67 @@
 package regression
 
 // This file verifies pagination.PaginationService's Find/FindWithTx — the
-// single-row counterpart to Filter/FilterWithTx tested in
-// pagination_query_test.go and pagination_service_interface_test.go. Each
-// takes a domains.StructuredFilter and returns the first matching row (or
-// sql.ErrNoRows), reusing paginate's own filtering/sorting/preload
-// machinery under a PageSize of 1.
+// multi-row counterpart to FindOne (pagination_find_one_test.go), which
+// returns only the first match. Find returns every row matching filter,
+// the same as Filter/FilterWithTx (pagination_service_interface_test.go),
+// but additionally supports an optional preloads override the way
+// FindOne/Count/Exists do, which plain Filter does not.
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"testing"
 
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
 )
 
-func TestPaginationFind_HappyPath_ReturnsTheOnlyMatchingRow(t *testing.T) {
+// TestPaginationFind_HappyPath_ReturnsEveryMatchingRow deliberately doesn't
+// set SortFields on filter: filter is passed through as paginate's
+// extraFilter (the same hardcoded/trusted slot PaginateFilter's filter
+// argument uses), and extraFilter.SortFields is never read by paginate —
+// only pagination.Filter.SortFields is (see paginate's own doc comment).
+// So row order here is whatever paginate's own default-sort fallback
+// produces, not something this test controls — hence the set-based
+// comparison instead of a positional one.
+func TestPaginationFind_HappyPath_ReturnsEveryMatchingRow(t *testing.T) {
 	t.Parallel()
 	c, read := newPaginationQueryTestCQRS(t)
 	seedWidgets(t, read,
-		widget{ID: "w1", Name: "Alpha", Priority: new(1)},
-		widget{ID: "w2", Name: "Beta", Priority: new(2)},
+		widget{ID: "w1", Name: "Alpha", Active: true},
+		widget{ID: "w2", Name: "Beta", Active: false},
+		widget{ID: "w3", Name: "Gamma", Active: true},
 	)
 
 	got, err := c.Find(context.Background(), domains.StructuredFilter{
-		Filters: []domains.Filter{{Field: "name", Mode: domains.ModeEqual, Value: "Beta"}},
+		Filters: []domains.Filter{{Field: "active", Mode: domains.ModeEqual, DataType: domains.DataTypeBool, Value: true}},
 	})
 	if err != nil {
 		t.Fatalf("Find returned error: %v", err)
 	}
-	if got == nil || got.ID != "w2" {
-		t.Fatalf("expected w2, got %+v", got)
+	gotIDs := map[string]bool{}
+	for _, r := range got {
+		gotIDs[r.ID] = true
+	}
+	if len(got) != 2 || !gotIDs["w1"] || !gotIDs["w3"] {
+		t.Fatalf("expected exactly {w1, w3} in some order, got %+v", got)
 	}
 }
 
-// TestPaginationFind_HappyPath_MultipleMatchesReturnsDeterministicFirstRow
-// confirms "first" isn't an arbitrary row: Find shares paginate's default
-// sort fallback (ColumnDefaultSort "updated_at DESC", tiebroken by
-// ColumnDefaultID DESC — see pagination_count_test.go's sibling note and
-// resolveSortFields/defaultSortField in pagination.cursor.go), so ties on
-// UpdatedAt fall back to id DESC: "w2" sorts before "w1".
-func TestPaginationFind_HappyPath_MultipleMatchesReturnsDeterministicFirstRow(t *testing.T) {
-	t.Parallel()
-	c, read := newPaginationQueryTestCQRS(t)
-	seedWidgets(t, read,
-		widget{ID: "w1", Name: "Alpha", Priority: new(5)},
-		widget{ID: "w2", Name: "Beta", Priority: new(5)},
-	)
-
-	got, err := c.Find(context.Background(), domains.StructuredFilter{
-		Filters: []domains.Filter{{Field: "priority", Mode: domains.ModeEqual, Value: 5}},
-	})
-	if err != nil {
-		t.Fatalf("Find returned error: %v", err)
-	}
-	if got == nil || got.ID != "w2" {
-		t.Fatalf("expected w2 (id DESC tiebreaker), got %+v", got)
-	}
-}
-
-func TestPaginationFind_SadPath_NoMatchReturnsErrNoRows(t *testing.T) {
+func TestPaginationFind_HappyPath_NoMatchReturnsEmptySliceNotError(t *testing.T) {
 	t.Parallel()
 	c, read := newPaginationQueryTestCQRS(t)
 	seedWidgets(t, read, widget{ID: "w1", Name: "Alpha"})
 
-	_, err := c.Find(context.Background(), domains.StructuredFilter{
+	got, err := c.Find(context.Background(), domains.StructuredFilter{
 		Filters: []domains.Filter{{Field: "name", Mode: domains.ModeEqual, Value: "NoSuchName"}},
 	})
-	if !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("expected sql.ErrNoRows, got %v", err)
+	if err != nil {
+		t.Fatalf("Find returned error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no rows, got %+v", got)
 	}
 }
 
-func TestPaginationFind_SadPath_EmptyTableReturnsErrNoRows(t *testing.T) {
-	t.Parallel()
-	c, _ := newPaginationQueryTestCQRS(t)
-	_, err := c.Find(context.Background(), domains.StructuredFilter{})
-	if !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("expected sql.ErrNoRows, got %v", err)
-	}
-}
-
-func TestPaginationFind_SadPath_ReturnsErrorWhenColumnDefaultIDIsEmpty(t *testing.T) {
-	t.Parallel()
-	c, _ := newPaginationQueryTestCQRS(t)
-	c.ColumnDefaultID = "" // bypasses the constructor's default, same class of setup error checkReady guards elsewhere
-	if _, err := c.Find(context.Background(), domains.StructuredFilter{}); err == nil {
-		t.Fatal("expected an error for an empty ColumnDefaultID, got nil")
-	}
-}
-
-// TestPaginationFind_SadPath_UnknownFilterFieldErrorsRatherThanDropping
-// mirrors TestPagination_SadPath_FilterWithTxUnknownFieldErrorsRatherThanDropping:
-// Find's filter argument goes through paginate as the hardcoded/trusted
-// slot (the same one Filter/FilterWithTx use), not the frontend-lenient
-// pagination.Filter slot Pagination/Paginate use — so an unknown field in
-// it is a real error, not something to silently drop.
 func TestPaginationFind_SadPath_UnknownFilterFieldErrorsRatherThanDropping(t *testing.T) {
 	t.Parallel()
 	c, read := newPaginationQueryTestCQRS(t)
@@ -123,24 +88,28 @@ func TestPaginationFind_PoisonPill_UnsupportedFilterModeReturnsError(t *testing.
 	}
 }
 
-func TestPaginationFind_HappyPath_PreloadIsApplied(t *testing.T) {
+// TestPaginationFind_HappyPath_PreloadOverrideAppliesPerCall confirms the
+// one real behavioral difference from plain Filter: Find lets a caller
+// override the configured default preloads per call.
+func TestPaginationFind_HappyPath_PreloadOverrideAppliesPerCall(t *testing.T) {
 	t.Parallel()
 	c, db := newPreloadTestCQRS(t)
 	ctx := context.Background()
 	seedPreloadAuthor(t, db, "a1", "Ada")
-	if _, err := c.CreateManyFormat(ctx, []preloadPost{{ID: "p1", Title: "One", AuthorID: "a1"}}); err != nil {
+	if _, err := c.CreateManyFormat(ctx, []preloadPost{
+		{ID: "p1", Title: "One", AuthorID: "a1"},
+		{ID: "p2", Title: "Two", AuthorID: "a1"},
+	}); err != nil {
 		t.Fatalf("seed CreateMany returned error: %v", err)
 	}
 
 	pc := newPaginationPreloadService(db)
-	got, err := pc.Find(ctx, domains.StructuredFilter{
-		Filters: []domains.Filter{{Field: "id", Mode: domains.ModeEqual, Value: "p1"}},
-	}, "Author")
+	got, err := pc.Find(ctx, domains.StructuredFilter{}, "Author")
 	if err != nil {
 		t.Fatalf("Find returned error: %v", err)
 	}
-	if got == nil || got.Author == nil || got.Author.Name != "Ada" {
-		t.Fatalf("expected Author preloaded with Name 'Ada', got %+v", got)
+	if len(got) != 2 || got[0].Author == nil || got[0].Author.Name != "Ada" || got[1].Author == nil || got[1].Author.Name != "Ada" {
+		t.Fatalf("expected both rows with Author preloaded, got %+v", got)
 	}
 }
 
@@ -165,7 +134,7 @@ func TestPaginationFind_HappyPath_FindWithTxSeesUncommittedWritesInTheSameTx(t *
 	if err != nil {
 		t.Fatalf("FindWithTx returned error: %v", err)
 	}
-	if inTx == nil || inTx.ID != "w1" {
+	if len(inTx) != 1 || inTx[0].ID != "w1" {
 		t.Fatalf("expected FindWithTx to see the uncommitted row, got %+v", inTx)
 	}
 
@@ -173,8 +142,11 @@ func TestPaginationFind_HappyPath_FindWithTxSeesUncommittedWritesInTheSameTx(t *
 		t.Fatalf("rolling back: %v", err)
 	}
 
-	_, err = c.Find(ctx, domains.StructuredFilter{})
-	if !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("expected sql.ErrNoRows after rollback, got %v", err)
+	after, err := c.Find(ctx, domains.StructuredFilter{})
+	if err != nil {
+		t.Fatalf("Find (after rollback) returned error: %v", err)
+	}
+	if len(after) != 0 {
+		t.Fatalf("expected no rows after rollback, got %+v", after)
 	}
 }
