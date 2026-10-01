@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
-	"github.com/Lands-Horizon-Corp/cqrs-go/src/pagination"
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/utils"
 	"github.com/go-playground/validator/v10"
 )
@@ -32,7 +31,7 @@ type CQRSImpl[TData any, TResponse any, TRequest any, TID comparable] struct {
 	LogService           domains.LogService
 	BroadcastService     domains.BroadcastService
 	MessageBrokerService domains.MessageBrokerService
-	paginationService    domains.PaginationService[TData, TID]
+	PaginationService    domains.PaginationService[TData, TID]
 
 	// Validator for struct validation
 	Validator *validator.Validate
@@ -102,13 +101,6 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 		BatchSize:            c.BatchSize,
 		FlushInterval:        c.FlushInterval,
 		idFieldIndex:         utils.BunColumnFieldIndex[TData](c.ColumnDefaultID),
-		paginationService: pagination.NewPaginationService(pagination.PaginationService[TData, TID]{
-			ReadSQLService:    c.ReadSQLService,
-			WriteSQLService:   c.WriteSQLService,
-			LogService:        c.LogService,
-			ColumnDefaultID:   c.ColumnDefaultID,
-			ColumnDefaultSort: c.ColumnDefaultSort,
-			Preloads:          c.Preloads,
-		}),
+		PaginationService:    c.PaginationService,
 	}
 }

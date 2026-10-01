@@ -13,6 +13,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
+	"github.com/Lands-Horizon-Corp/cqrs-go/src/pagination"
 )
 
 // TestLedgerConcurrency_HappyPath_ManyConcurrentTransfersPreserveTotalBalance
@@ -344,5 +347,70 @@ func TestLedgerConcurrency_LockContentionAndDeadlocks_OppositeOrderTransfersAreD
 	}
 	if a1.BalanceCents != 1000000 || a2.BalanceCents != 1000000 {
 		t.Fatalf("expected both accounts back at their starting balance (equal transfers each way), got a1=%d a2=%d", a1.BalanceCents, a2.BalanceCents)
+	}
+}
+
+// TestLedgerConcurrency_HappyPath_PaginateWithHertzDeliberatelyDoesNotLock
+// is the deliberate opposite of
+// TestLedgerConcurrency_HappyPath_ForUpdateSerializesConcurrentLockersOfSameRow:
+// PaginateWithHertz is a browsing/listing path (see paginate's own doc
+// comment in pagination.structured.go), not a read-then-write one, so it
+// must NOT take a row lock the way every other *WithTx fetch does. A
+// second transaction's GetByIDWithTx on the same row — which does lock —
+// must succeed immediately rather than blocking on anything
+// PaginateWithHertz was holding. If this ever starts blocking, either
+// PaginateWithHertz started locking (an intentional change that should
+// update its doc comment too) or something regressed.
+func TestLedgerConcurrency_HappyPath_PaginateWithHertzDeliberatelyDoesNotLock(t *testing.T) {
+	t.Parallel()
+	c, write := newLedgerCQRSWithPool(t, 8)
+	seedLedgerAccounts(t, write, ledgerAccount{ID: "a1", Name: "Alice", BalanceCents: 1000})
+	ctx := context.Background()
+
+	pc := pagination.NewPaginationService(pagination.PaginationService[ledgerAccount, string]{
+		ReadSQLService: write,
+	})
+
+	tx1, err := write.Client().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx returned error: %v", err)
+	}
+	defer func() { _ = tx1.Rollback() }()
+
+	reqCtx := newPaginationTestContext(t, map[string]string{
+		"filter": encodeQueryParam(t, domains.StructuredFilter{
+			Filters: []domains.Filter{{Field: "id", Mode: domains.ModeEqual, Value: "a1"}},
+		}),
+	})
+	result, err := pc.PaginateWithHertz(ctx, &tx1, domains.StructuredFilter{}, reqCtx)
+	if err != nil {
+		t.Fatalf("PaginateWithHertz returned error: %v", err)
+	}
+	if len(result.Data) != 1 || result.Data[0].ID != "a1" {
+		t.Fatalf("expected [a1], got %+v", result.Data)
+	}
+
+	// tx1 is still open and never rolled back yet — if PaginateWithHertz
+	// had locked "a1", this would block until the defer above runs.
+	unblocked := make(chan struct{})
+	go func() {
+		tx2, err := c.Start(ctx)
+		if err != nil {
+			t.Errorf("Start tx2 returned error: %v", err)
+			return
+		}
+		defer func() { _ = c.End(ctx, tx2, nil) }()
+		if _, err := c.GetByIDWithTx(ctx, &tx2, "a1"); err != nil {
+			t.Errorf("GetByIDWithTx (tx2) returned error: %v", err)
+		}
+		close(unblocked)
+	}()
+
+	select {
+	case <-unblocked:
+		// expected: PaginateWithHertz took no lock, so tx2 never had to wait.
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected tx2's GetByIDWithTx to succeed immediately (PaginateWithHertz must not lock), " +
+			"but it blocked for 2s instead")
 	}
 }

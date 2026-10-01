@@ -41,6 +41,8 @@ type ledgerHistoryEntry struct {
 // not just asserting the invariant in isolation.
 func TestLedgerJepsenStyle_ConcurrentHistorySatisfiesInvariantsUnderAnySerialization(t *testing.T) {
 	t.Parallel()
+	t.Log("note: this is Jepsen-style invariant checking against a single Postgres instance, " +
+		"not real multi-node Jepsen (no distributed consensus layer exists here to nemesis-test) — see this file's own doc comment")
 	c, write := newLedgerCQRSWithPool(t, 24)
 
 	const numAccounts = 10

@@ -29,6 +29,19 @@ import (
 // pre-update value — unlike GetByID+UpdateByID's fully exposed
 // read/modify/write gap, which even a transaction alone would not close
 // without additional locking.
+//
+// delta is float64, but the precision limit that implies is narrower than
+// it looks: it bounds delta itself, not the column's stored value. The
+// column can hold any int64, arbitrarily large, with no precision loss —
+// confirmed directly against both Postgres and SQLite: a column already
+// at 1<<60 incremented by a small delta lands exactly, every time,
+// because the database does the actual addition against its own exact
+// integer type once delta is formatted into the query, not against a
+// float64 accumulator. The only real risk is narrower still: if a single
+// call's delta itself exceeds 2^53 (9,007,199,254,740,992 — about $90
+// trillion at cent granularity, so not a concern for realistic monetary
+// deltas), that one delta can no longer be represented exactly as a
+// float64 and silently rounds before it ever reaches SQL.
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) IncrementByID(
 	ctx context.Context, id TID, field string, delta float64,
 ) (*TData, error) {

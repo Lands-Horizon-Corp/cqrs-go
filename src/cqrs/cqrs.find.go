@@ -13,7 +13,7 @@ import (
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Find(
 	ctx context.Context, filter domains.StructuredFilter, preloads ...string,
 ) ([]*TData, error) {
-	return c.paginationService.Find(ctx, filter, preloads...)
+	return c.PaginationService.Find(ctx, filter, preloads...)
 }
 
 // FindFormat is Find with each matched row converted through ToResource,
@@ -38,7 +38,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FindFormat(
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FindWithTx(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter, preloads ...string,
 ) ([]*TData, error) {
-	return c.paginationService.FindWithTx(ctx, tx, filter, preloads...)
+	return c.PaginationService.FindWithTx(ctx, tx, filter, preloads...)
 }
 
 // FindWithTxFormat is FindWithTx with each matched row converted through

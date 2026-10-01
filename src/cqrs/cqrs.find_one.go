@@ -14,7 +14,7 @@ import (
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FindOne(
 	ctx context.Context, filter domains.StructuredFilter, preloads ...string,
 ) (*TData, error) {
-	return c.paginationService.FindOne(ctx, filter, preloads...)
+	return c.PaginationService.FindOne(ctx, filter, preloads...)
 }
 
 // FindOneFormat is FindOne with the matched row converted through
@@ -43,7 +43,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FindOneFormat(
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FindOneWithTx(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter, preloads ...string,
 ) (*TData, error) {
-	return c.paginationService.FindOneWithTx(ctx, tx, filter, preloads...)
+	return c.PaginationService.FindOneWithTx(ctx, tx, filter, preloads...)
 }
 
 // FindOneWithTxFormat is FindOneWithTx with the matched row converted

@@ -11,12 +11,12 @@ import (
 
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Paginate(
 	ctx context.Context, pagination domains.Pagination) (domains.PaginationResult[TData], error) {
-	return c.paginationService.Paginate(ctx, pagination)
+	return c.PaginationService.Paginate(ctx, pagination)
 }
 
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) PaginateFormat(
 	ctx context.Context, pagination domains.Pagination) (domains.PaginationResult[TResponse], error) {
-	paginationResult, err := c.paginationService.Paginate(ctx, pagination)
+	paginationResult, err := c.PaginationService.Paginate(ctx, pagination)
 	if err != nil {
 		return domains.PaginationResult[TResponse]{}, err
 	}
@@ -31,12 +31,12 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) PaginateFormat(
 
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) PaginateFilter(
 	ctx context.Context, filter domains.StructuredFilter, pagination domains.Pagination) (domains.PaginationResult[TData], error) {
-	return c.paginationService.PaginateFilter(ctx, filter, pagination)
+	return c.PaginationService.PaginateFilter(ctx, filter, pagination)
 }
 
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) PaginateFilterFormat(
 	ctx context.Context, filter domains.StructuredFilter, pagination domains.Pagination) (domains.PaginationResult[TResponse], error) {
-	paginationResult, err := c.paginationService.PaginateFilter(ctx, filter, pagination)
+	paginationResult, err := c.PaginationService.PaginateFilter(ctx, filter, pagination)
 	if err != nil {
 		return domains.PaginationResult[TResponse]{}, err
 	}
@@ -51,12 +51,12 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) PaginateFilterFormat(
 
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Filter(
 	ctx context.Context, filter domains.StructuredFilter) ([]*TData, error) {
-	return c.paginationService.Filter(ctx, filter)
+	return c.PaginationService.Filter(ctx, filter)
 }
 
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FilterFormat(
 	ctx context.Context, filter domains.StructuredFilter) ([]*TResponse, error) {
-	data, err := c.paginationService.Filter(ctx, filter)
+	data, err := c.PaginationService.Filter(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -65,12 +65,12 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FilterFormat(
 
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FilterWithTx(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter) ([]*TData, error) {
-	return c.paginationService.FilterWithTx(ctx, tx, filter)
+	return c.PaginationService.FilterWithTx(ctx, tx, filter)
 }
 
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FilterWithTxFormat(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter) ([]*TResponse, error) {
-	data, err := c.paginationService.FilterWithTx(ctx, tx, filter)
+	data, err := c.PaginationService.FilterWithTx(ctx, tx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -79,12 +79,12 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) FilterWithTxFormat(
 
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) PaginateWithHertz(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter, reqCtx *app.RequestContext) (domains.PaginationResult[TData], error) {
-	return c.paginationService.PaginateWithHertz(ctx, tx, filter, reqCtx)
+	return c.PaginationService.PaginateWithHertz(ctx, tx, filter, reqCtx)
 }
 
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) PaginateWithHertzFormat(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter, reqCtx *app.RequestContext) (domains.PaginationResult[TResponse], error) {
-	paginationResult, err := c.paginationService.PaginateWithHertz(ctx, tx, filter, reqCtx)
+	paginationResult, err := c.PaginationService.PaginateWithHertz(ctx, tx, filter, reqCtx)
 	if err != nil {
 		return domains.PaginationResult[TResponse]{}, err
 	}

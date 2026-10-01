@@ -14,7 +14,7 @@ import (
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Count(
 	ctx context.Context, filter domains.StructuredFilter,
 ) (int64, error) {
-	return c.paginationService.Count(ctx, filter)
+	return c.PaginationService.Count(ctx, filter)
 }
 
 // CountWithTx is Count run against a caller-supplied *bun.Tx instead of a
@@ -27,5 +27,5 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Count(
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) CountWithTx(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter,
 ) (int64, error) {
-	return c.paginationService.CountWithTx(ctx, tx, filter)
+	return c.PaginationService.CountWithTx(ctx, tx, filter)
 }

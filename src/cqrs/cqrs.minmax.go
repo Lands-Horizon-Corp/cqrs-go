@@ -12,7 +12,7 @@ import (
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Max(
 	ctx context.Context, field string, filter domains.StructuredFilter, preloads ...string,
 ) (*TData, error) {
-	return c.paginationService.GetMax(ctx, field, filter, preloads...)
+	return c.PaginationService.GetMax(ctx, field, filter, preloads...)
 }
 
 // MaxFormat is Max with the matched row converted through ToResource, for
@@ -34,7 +34,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) MaxFormat(
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Min(
 	ctx context.Context, field string, filter domains.StructuredFilter, preloads ...string,
 ) (*TData, error) {
-	return c.paginationService.GetMin(ctx, field, filter, preloads...)
+	return c.PaginationService.GetMin(ctx, field, filter, preloads...)
 }
 
 // MinFormat is Min with the matched row converted through ToResource, for
@@ -62,7 +62,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) MinFormat(
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) MaxWithTx(
 	ctx context.Context, tx *bun.Tx, field string, filter domains.StructuredFilter, preloads ...string,
 ) (*TData, error) {
-	return c.paginationService.GetMaxWithTx(ctx, tx, field, filter, preloads...)
+	return c.PaginationService.GetMaxWithTx(ctx, tx, field, filter, preloads...)
 }
 
 // MaxWithTxFormat is MaxWithTx with the matched row converted through
@@ -85,7 +85,7 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) MaxWithTxFormat(
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) MinWithTx(
 	ctx context.Context, tx *bun.Tx, field string, filter domains.StructuredFilter, preloads ...string,
 ) (*TData, error) {
-	return c.paginationService.GetMinWithTx(ctx, tx, field, filter, preloads...)
+	return c.PaginationService.GetMinWithTx(ctx, tx, field, filter, preloads...)
 }
 
 // MinWithTxFormat is MinWithTx with the matched row converted through

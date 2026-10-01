@@ -95,6 +95,8 @@ func BenchmarkLedgerIncrementByID(b *testing.B) {
 // mix of commit and abort paths instead of a consistent one).
 func benchmarkLedgerSetup(b *testing.B) (*ledgerCQRS, []string) {
 	b.Helper()
+	b.Log("note: inspired by TPC-B's debit/credit transaction shape, not a literal TPC-B/TPC-C " +
+		"implementation — see this file's own doc comment")
 
 	const numAccounts = 20
 	const startingBalance = 1 << 40 // effectively unlimited at 1-cent-per-op scale

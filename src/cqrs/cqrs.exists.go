@@ -14,7 +14,7 @@ import (
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Exists(
 	ctx context.Context, filter domains.StructuredFilter,
 ) (bool, error) {
-	return c.paginationService.Exists(ctx, filter)
+	return c.PaginationService.Exists(ctx, filter)
 }
 
 // ExistsWithTx is Exists run against a caller-supplied *bun.Tx instead of a
@@ -27,5 +27,5 @@ func (c *CQRSImpl[TData, TResponse, TRequest, TID]) Exists(
 func (c *CQRSImpl[TData, TResponse, TRequest, TID]) ExistsWithTx(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter,
 ) (bool, error) {
-	return c.paginationService.ExistsWithTx(ctx, tx, filter)
+	return c.PaginationService.ExistsWithTx(ctx, tx, filter)
 }
