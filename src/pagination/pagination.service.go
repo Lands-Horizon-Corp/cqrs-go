@@ -36,7 +36,7 @@ func (c *PaginationService[TData, TID]) PaginateFilter(
 	if err := c.checkReady(); err != nil {
 		return domains.PaginationResult[TData]{}, err
 	}
-	result, err := c.paginate(ctx, c.ReadSQLService.Client(), filter, pagination)
+	result, err := c.paginate(ctx, c.ReadSQLService.Client(), filter, pagination, false)
 	if err != nil {
 		return domains.PaginationResult[TData]{}, err
 	}
@@ -72,13 +72,18 @@ func (c *PaginationService[TData, TID]) Filter(
 // pagination parameter and no PaginationResult wrapper, since a
 // transactional read-your-writes lookup like this has no frontend request
 // behind it to carry page size/cursor for.
+//
+// Every matched row is locked ("SELECT ... FOR UPDATE" — see paginate's own
+// doc comment for why every *WithTx fetch does this): the whole reason to
+// reach for this instead of Filter is "I'm about to act on these rows
+// inside this same transaction."
 func (c *PaginationService[TData, TID]) FilterWithTx(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter,
 ) ([]*TData, error) {
 	if err := c.checkReady(); err != nil {
 		return nil, err
 	}
-	result, err := c.paginate(ctx, tx, filter, domains.Pagination{})
+	result, err := c.paginate(ctx, tx, filter, domains.Pagination{}, true)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +120,12 @@ func (c *PaginationService[TData, TID]) PaginateWithHertz(
 	if err := pagination.Parse(reqCtx); err != nil {
 		return domains.PaginationResult[TData]{}, err
 	}
-	result, err := c.paginate(ctx, tx, filter, pagination)
+	// forUpdate is deliberately false here, unlike FilterWithTx: this is a
+	// browsing/listing path (a paginated page of results for display), not
+	// a "read this row because I'm about to write it" one — locking every
+	// row of a paginated listing by default would be a surprising and
+	// likely harmful default for what's usually a read-only request.
+	result, err := c.paginate(ctx, tx, filter, pagination, false)
 	if err != nil {
 		return domains.PaginationResult[TData]{}, err
 	}

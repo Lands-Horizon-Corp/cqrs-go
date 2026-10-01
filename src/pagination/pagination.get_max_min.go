@@ -22,7 +22,7 @@ func (c *PaginationService[TData, TID]) GetMax(
 	if err := c.checkReady(); err != nil {
 		return nil, err
 	}
-	return c.extreme(ctx, c.ReadSQLService.Client(), field, domains.SortOrderDesc, filter, preloads...)
+	return c.extreme(ctx, c.ReadSQLService.Client(), field, domains.SortOrderDesc, filter, false, preloads...)
 }
 
 // GetMin is GetMax's opposite: the row whose field holds the lowest value.
@@ -32,7 +32,7 @@ func (c *PaginationService[TData, TID]) GetMin(
 	if err := c.checkReady(); err != nil {
 		return nil, err
 	}
-	return c.extreme(ctx, c.ReadSQLService.Client(), field, domains.SortOrderAsc, filter, preloads...)
+	return c.extreme(ctx, c.ReadSQLService.Client(), field, domains.SortOrderAsc, filter, false, preloads...)
 }
 
 // GetMaxWithTx is GetMax run against a caller-supplied *bun.Tx instead of a
@@ -42,14 +42,15 @@ func (c *PaginationService[TData, TID]) GetMin(
 // ReadSQLService may point at a replica that doesn't even share it — e.g.
 // finding the row with the highest field value written earlier in the same
 // transaction, before it commits and becomes visible through a separate
-// connection.
+// connection. The matched row is locked ("SELECT ... FOR UPDATE" — see
+// paginate's own doc comment for why every *WithTx fetch does this).
 func (c *PaginationService[TData, TID]) GetMaxWithTx(
 	ctx context.Context, tx *bun.Tx, field string, filter domains.StructuredFilter, preloads ...string,
 ) (*TData, error) {
 	if err := c.checkReady(); err != nil {
 		return nil, err
 	}
-	return c.extreme(ctx, tx, field, domains.SortOrderDesc, filter, preloads...)
+	return c.extreme(ctx, tx, field, domains.SortOrderDesc, filter, true, preloads...)
 }
 
 // GetMinWithTx is GetMin's *bun.Tx counterpart (see GetMaxWithTx's doc
@@ -60,7 +61,7 @@ func (c *PaginationService[TData, TID]) GetMinWithTx(
 	if err := c.checkReady(); err != nil {
 		return nil, err
 	}
-	return c.extreme(ctx, tx, field, domains.SortOrderAsc, filter, preloads...)
+	return c.extreme(ctx, tx, field, domains.SortOrderAsc, filter, true, preloads...)
 }
 
 // extreme runs filter through paginate with SortFields forced to
@@ -69,12 +70,12 @@ func (c *PaginationService[TData, TID]) GetMinWithTx(
 // translating "no match" into sql.ErrNoRows rather than a silent nil.
 func (c *PaginationService[TData, TID]) extreme(
 	ctx context.Context, db bun.IDB, field string, order domains.SortOrder,
-	filter domains.StructuredFilter, preloads ...string,
+	filter domains.StructuredFilter, forUpdate bool, preloads ...string,
 ) (*TData, error) {
 	result, err := c.paginate(ctx, db, filter, domains.Pagination{
 		PageSize: 1,
 		Filter:   domains.StructuredFilter{SortFields: []domains.SortField{{Field: field, Order: order}}},
-	}, preloads...)
+	}, forUpdate, preloads...)
 	if err != nil {
 		return nil, err
 	}

@@ -19,7 +19,7 @@ func (c *PaginationService[TData, TID]) Find(
 	if err := c.checkReady(); err != nil {
 		return nil, err
 	}
-	result, err := c.paginate(ctx, c.ReadSQLService.Client(), filter, domains.Pagination{}, preloads...)
+	result, err := c.paginate(ctx, c.ReadSQLService.Client(), filter, domains.Pagination{}, false, preloads...)
 	if err != nil {
 		return nil, err
 	}
@@ -31,14 +31,16 @@ func (c *PaginationService[TData, TID]) Find(
 // writer), not ReadSQLService — see FilterWithTx's doc comment in
 // pagination.service.go for why — e.g. finding rows written earlier in the
 // same transaction, before it commits and becomes visible through a
-// separate connection.
+// separate connection. Every matched row is locked ("SELECT ... FOR
+// UPDATE" — see paginate's own doc comment for why every *WithTx fetch
+// does this).
 func (c *PaginationService[TData, TID]) FindWithTx(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter, preloads ...string,
 ) ([]*TData, error) {
 	if err := c.checkReady(); err != nil {
 		return nil, err
 	}
-	result, err := c.paginate(ctx, tx, filter, domains.Pagination{}, preloads...)
+	result, err := c.paginate(ctx, tx, filter, domains.Pagination{}, true, preloads...)
 	if err != nil {
 		return nil, err
 	}

@@ -21,7 +21,7 @@ func (c *PaginationService[TData, TID]) FindOne(
 	if err := c.checkReady(); err != nil {
 		return nil, err
 	}
-	return c.findOne(ctx, c.ReadSQLService.Client(), filter, preloads...)
+	return c.findOne(ctx, c.ReadSQLService.Client(), filter, false, preloads...)
 }
 
 // FindOneWithTx is FindOne run against a caller-supplied *bun.Tx instead of
@@ -29,14 +29,15 @@ func (c *PaginationService[TData, TID]) FindOne(
 // writer), not ReadSQLService — see FilterWithTx's doc comment in
 // pagination.service.go for why — e.g. finding a row written earlier in the
 // same transaction, before it commits and becomes visible through a
-// separate connection.
+// separate connection. The matched row is locked ("SELECT ... FOR UPDATE"
+// — see paginate's own doc comment for why every *WithTx fetch does this).
 func (c *PaginationService[TData, TID]) FindOneWithTx(
 	ctx context.Context, tx *bun.Tx, filter domains.StructuredFilter, preloads ...string,
 ) (*TData, error) {
 	if err := c.checkReady(); err != nil {
 		return nil, err
 	}
-	return c.findOne(ctx, tx, filter, preloads...)
+	return c.findOne(ctx, tx, filter, true, preloads...)
 }
 
 // findOne runs filter through paginate with PageSize 1 and unwraps the
@@ -44,9 +45,9 @@ func (c *PaginationService[TData, TID]) FindOneWithTx(
 // same not-found signal UpdateByID/DeleteByID use elsewhere in this
 // project — rather than a silent nil with no error.
 func (c *PaginationService[TData, TID]) findOne(
-	ctx context.Context, db bun.IDB, filter domains.StructuredFilter, preloads ...string,
+	ctx context.Context, db bun.IDB, filter domains.StructuredFilter, forUpdate bool, preloads ...string,
 ) (*TData, error) {
-	result, err := c.paginate(ctx, db, filter, domains.Pagination{PageSize: 1}, preloads...)
+	result, err := c.paginate(ctx, db, filter, domains.Pagination{PageSize: 1}, forUpdate, preloads...)
 	if err != nil {
 		return nil, err
 	}

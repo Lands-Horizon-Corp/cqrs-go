@@ -69,8 +69,10 @@ var (
 
 // skipUnlessInfraReachable does a fast TCP dial against each dependency and
 // skips the test (rather than failing/hanging) if the local docker-compose
-// stack isn't up.
-func skipUnlessInfraReachable(t *testing.T) {
+// stack isn't up. Takes testing.TB rather than *testing.T so benchmarks
+// (ledger_bench_test.go) can reuse it too — t.Skipf is part of the shared
+// interface either way.
+func skipUnlessInfraReachable(t testing.TB) {
 	t.Helper()
 	check := func(label, addr string) {
 		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)

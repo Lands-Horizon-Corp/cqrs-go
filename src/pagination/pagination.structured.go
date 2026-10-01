@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect"
 
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/utils"
@@ -50,7 +51,7 @@ func (c *PaginationService[TData, TID]) Pagination(
 	if err := c.checkReady(); err != nil {
 		return nil, err
 	}
-	return c.paginate(ctx, c.ReadSQLService.Client(), domains.StructuredFilter{}, pagination, preloads...)
+	return c.paginate(ctx, c.ReadSQLService.Client(), domains.StructuredFilter{}, pagination, false, preloads...)
 }
 
 // checkReady validates the operator-configured fields Pagination and every
@@ -88,11 +89,29 @@ func (c *PaginationService[TData, TID]) checkReady() error {
 // lenient drop-and-warn first). PaginateFilter/FilterWithTx are what give
 // callers a way to supply extraFilter; Pagination itself always passes a
 // zero-value one, which applyFilters treats as a no-op.
+//
+// forUpdate adds a pessimistic row lock ("SELECT ... FOR UPDATE") to the
+// query: every *WithTx single/multi-row fetch (FilterWithTx, FindWithTx,
+// FindOneWithTx, GetByIDWithTx, MaxWithTx, MinWithTx) passes true, since
+// the whole reason a caller reaches for one of those instead of the plain
+// (ReadSQLService-backed) version is "I'm about to act on what I just read,
+// inside this same transaction" — the classic check-then-act gap (read a
+// balance, decide what to write, write it) is exactly what a second,
+// concurrent transaction could otherwise run straight through, between the
+// first one's read and its write. Pagination/PaginateFilter/
+// PaginateWithHertz (a browsing/listing path, not a read-then-write one)
+// always pass false. Only PostgreSQL actually supports this — SQLite has
+// no such clause at all (confirmed directly: it's a syntax error) — so
+// forUpdate is a no-op against any other dialect, which is what lets this
+// package's SQLite-backed unit tests keep exercising every *WithTx method
+// without a live Postgres instance; real lock-contention/deadlock
+// behavior is only meaningful, and only tested, against real Postgres.
 func (c *PaginationService[TData, TID]) paginate(
 	ctx context.Context,
 	db bun.IDB,
 	extraFilter domains.StructuredFilter,
 	pagination domains.Pagination,
+	forUpdate bool,
 	preloads ...string,
 ) (*domains.PaginationResult[TData], error) {
 	if pagination.PageSize <= 0 {
@@ -132,6 +151,15 @@ func (c *PaginationService[TData, TID]) paginate(
 
 	var data []TData
 	if hasCursor && !uniform {
+		if forUpdate {
+			// Unreachable by every current forUpdate=true caller (none of
+			// them ever supply a cursor — see paginate's own doc comment),
+			// kept as a safety net: Postgres rejects FOR UPDATE combined
+			// with the UNION ALL paginateMixedDirection builds outright, so
+			// this would otherwise surface as a confusing driver error
+			// instead of a clear one if that ever changed.
+			return nil, fmt.Errorf("pagination: row locking (FOR UPDATE) is not supported with mixed-direction cursor pagination")
+		}
 		if err := c.paginateMixedDirection(ctx, db, &data, extraFilter, pagination.Filter, sortFields, payload, backward, limit); err != nil {
 			return nil, err
 		}
@@ -169,6 +197,9 @@ func (c *PaginationService[TData, TID]) paginate(
 			q = q.OrderExpr("? "+dir+" NULLS LAST", bun.Ident(sf.Field))
 		}
 		q = q.Limit(limit)
+		if forUpdate && db.Dialect().Name() == dialect.PG {
+			q = q.For("UPDATE")
+		}
 		if err := q.Scan(ctx); err != nil {
 			return nil, fmt.Errorf("scanning page: %w", err)
 		}
