@@ -109,8 +109,8 @@ func TestFilterMutation_IsEmptyNullVsFalse_KillsOrToAndMutant(t *testing.T) {
 	c, read := newPaginationQueryTestCQRS(t)
 	seedWidgets(t, read,
 		widget{ID: "w1", Name: "NullFeatured", Featured: nil},
-		widget{ID: "w2", Name: "FalseFeatured", Featured: boolPtr(false)},
-		widget{ID: "w3", Name: "TrueFeatured", Featured: boolPtr(true)},
+		widget{ID: "w2", Name: "FalseFeatured", Featured: new(false)},
+		widget{ID: "w3", Name: "TrueFeatured", Featured: new(true)},
 	)
 	sort := []domains.SortField{{Field: "id", Order: domains.SortOrderAsc}}
 

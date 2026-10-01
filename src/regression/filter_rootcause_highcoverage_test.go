@@ -200,15 +200,15 @@ func TestFilterHighCoverage_BooleanObjectNestedAndDateTimeShapes(t *testing.T) {
 	// is nil, so leaving it unset would make every one of them an
 	// unintended extra match for the IsEmpty/IsNotEmpty cases.
 	seedWidgets(t, read,
-		widget{ID: "plain-bool-true", Active: true, Featured: boolPtr(true)},
-		widget{ID: "plain-bool-false", Active: false, Featured: boolPtr(true)},
+		widget{ID: "plain-bool-true", Active: true, Featured: new(true)},
+		widget{ID: "plain-bool-false", Active: false, Featured: new(true)},
 		widget{ID: "nullable-bool-null", Featured: nil},
-		widget{ID: "nullable-bool-false", Featured: boolPtr(false)},
-		widget{ID: "nullable-bool-true", Featured: boolPtr(true)},
-		widget{ID: "flat-object", Name: `{"city":"NYC"}`, Featured: boolPtr(true)},
-		widget{ID: "nested-object", Name: `{"address":{"city":"NYC"}}`, Featured: boolPtr(true)},
-		widget{ID: "dated", ExpiresAt: new(jan1), Featured: boolPtr(true)},
-		widget{ID: "dated-later", ExpiresAt: new(dec1), Featured: boolPtr(true)},
+		widget{ID: "nullable-bool-false", Featured: new(false)},
+		widget{ID: "nullable-bool-true", Featured: new(true)},
+		widget{ID: "flat-object", Name: `{"city":"NYC"}`, Featured: new(true)},
+		widget{ID: "nested-object", Name: `{"address":{"city":"NYC"}}`, Featured: new(true)},
+		widget{ID: "dated", ExpiresAt: new(jan1), Featured: new(true)},
+		widget{ID: "dated-later", ExpiresAt: new(dec1), Featured: new(true)},
 	)
 
 	cases := []struct {
