@@ -36,13 +36,13 @@ type SQLService interface {
 type PaginationService[TData any, TID comparable] interface {
 	Paginate(ctx context.Context, pagination Pagination) (PaginationResult[TData], error)
 	PaginateFilter(ctx context.Context, filter StructuredFilter, pagination Pagination) (PaginationResult[TData], error)
-
 	Filter(ctx context.Context, filter StructuredFilter) ([]*TData, error)
 	FilterWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter) ([]*TData, error)
-
-	// PaginateWithHertz is PaginateFilter against a *bun.Tx, with the
-	// domains.Pagination half parsed directly off a Hertz request (see
-	// Pagination.Parse) instead of requiring the caller to have already
-	// parsed one.
 	PaginateWithHertz(ctx context.Context, tx *bun.Tx, filter StructuredFilter, reqCtx *app.RequestContext) (PaginationResult[TData], error)
+	Count(ctx context.Context, filter StructuredFilter) (int64, error)
+	CountWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter) (int64, error)
+	Exists(ctx context.Context, filter StructuredFilter) (bool, error)
+	ExistsWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter) (bool, error)
+	Find(ctx context.Context, filter StructuredFilter, preloads ...string) (*TData, error)
+	FindWithTx(ctx context.Context, tx *bun.Tx, filter StructuredFilter, preloads ...string) (*TData, error)
 }
