@@ -61,16 +61,20 @@ docker-logs:
 test-integration: docker-up
 	go test -tags=integration ./src/regression/... -run 'TestIntegration|TestLedger' -parallel 8 -v
 
-## test-all: unit suite, then the real integration suite.
-test-all: test-unit test-integration
+## test-all: everything, in order: unit suite, real integration suite, then
+## the opt-in load, ledger-load and ledger-bench runs. docker-up is a shared
+## prerequisite, so the stack comes up once. Takes real minutes; use
+## test-unit or test-integration for a faster run. N, UPDATE_N and SECONDS
+## still override the load sizes, e.g. make test-all N=100000 SECONDS=60
+test-all: test-unit test-integration test-load test-ledger-load test-ledger-bench
 
 ## test-load: opt-in, large-scale create/update/delete throughput test
 ## (CDC pipeline — bulk Create/Update/Delete plus Debezium/Kafka
 ## replication to the read db). Defaults to 50k rows; override with N
 ## (and optionally UPDATE_N) for a bigger run, e.g.:
 ## make test-load N=1000000 UPDATE_N=50000
-## A million-row run takes real minutes — this never runs as part of
-## test-all or test-integration.
+## A million-row run takes real minutes. It runs as part of test-all with
+## the default sizes, but never as part of test-integration.
 test-load: docker-up
 	CQRS_IT_LOAD_N=$(or $(N),50000) CQRS_IT_LOAD_UPDATE_N=$(or $(UPDATE_N),5000) \
 		go test -tags="integration load" ./src/regression/... -run TestLoad -v -timeout 30m
