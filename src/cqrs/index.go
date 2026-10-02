@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/domains"
+	"github.com/Lands-Horizon-Corp/cqrs-go/src/pagination"
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/utils"
 	"github.com/go-playground/validator/v10"
 )
@@ -31,7 +32,14 @@ type CQRSImpl[TData any, TResponse any, TRequest any, TID comparable] struct {
 	LogService           domains.LogService
 	BroadcastService     domains.BroadcastService
 	MessageBrokerService domains.MessageBrokerService
-	PaginationService    domains.PaginationService[TData, TID]
+	// PaginationService backs every read/filter/transaction-locking method
+	// on this type (Filter, Find, FindOne, GetByID, Max, Min, Count,
+	// Exists, Paginate, and all of their *WithTx variants). Leave it nil —
+	// NewCQRS builds one automatically from ReadSQLService/WriteSQLService/
+	// LogService/the column config below. Set it yourself only to inject a
+	// different implementation (a test double, a decorator); NewCQRS then
+	// leaves your value alone instead of overwriting it.
+	PaginationService domains.PaginationService[TData, TID]
 
 	// Validator for struct validation
 	Validator *validator.Validate
@@ -77,6 +85,16 @@ func NewCQRS[TData any, TResponse any, TRequest any, TID comparable](
 	}
 	if c.FlushInterval == 0 {
 		c.FlushInterval = 5 * time.Second
+	}
+	if c.PaginationService == nil {
+		c.PaginationService = pagination.NewPaginationService(pagination.PaginationService[TData, TID]{
+			ReadSQLService:    c.ReadSQLService,
+			WriteSQLService:   c.WriteSQLService,
+			LogService:        c.LogService,
+			ColumnDefaultID:   c.ColumnDefaultID,
+			ColumnDefaultSort: c.ColumnDefaultSort,
+			Preloads:          c.Preloads,
+		})
 	}
 	return &CQRSImpl[TData, TResponse, TRequest, TID]{
 		Channel:              c.Channel,

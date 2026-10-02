@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/uptrace/bun"
 
 	"github.com/Lands-Horizon-Corp/cqrs-go/src/utils"
 )
@@ -18,6 +19,7 @@ const (
 	ModeStartsWith  Mode = "startsWith"
 	ModeEndsWith    Mode = "endsWith"
 	ModeSearch      Mode = "search"
+	ModeCustom      Mode = "custom"
 	ModeInside      Mode = "inside"
 	ModeOutside     Mode = "outside"
 	ModeGT          Mode = "gt"
@@ -69,7 +71,9 @@ type (
 		From time.Time `json:"from"`
 		To   time.Time `json:"to"`
 	}
-	SortField struct {
+	// CustomFilter is a ModeCustom term built in Go and set on Filter.Custom; Filter.Value is its argument.
+	CustomFilter func(q *bun.SelectQuery, value any) (*bun.SelectQuery, error)
+	SortField    struct {
 		Field string    `json:"field"`
 		Order SortOrder `json:"order"`
 	}
@@ -78,6 +82,8 @@ type (
 		Value    any      `json:"value"`
 		Mode     Mode     `json:"mode"`
 		DataType DataType `json:"dataType"`
+		// Custom is a ModeCustom term set in Go only; json:"-" keeps clients from supplying it.
+		Custom CustomFilter `json:"-"`
 	}
 	StructuredFilter struct {
 		Filters    []Filter    `json:"filters"`

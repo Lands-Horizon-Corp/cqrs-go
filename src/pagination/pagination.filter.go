@@ -44,7 +44,8 @@ func (c *PaginationService[TData, TID]) applyFilters(
 			// naming one real column — that's the one case allowed to skip
 			// the unknown-field check below.
 			wholeIndexSearch := f.Mode == domains.ModeSearch && f.Field == ""
-			if !wholeIndexSearch && utils.BunColumnFieldIndex[TData](f.Field) == -1 {
+			isCustom := f.Mode == domains.ModeCustom
+			if !wholeIndexSearch && !isCustom && utils.BunColumnFieldIndex[TData](f.Field) == -1 {
 				groupErr = fmt.Errorf("unknown filter field %q", f.Field)
 				break
 			}
@@ -54,7 +55,7 @@ func (c *PaginationService[TData, TID]) applyFilters(
 				// a valid query back, even when we're about to abort via
 				// groupErr — returning the original inner unchanged keeps
 				// bun's internal chain intact.
-				newQ, err := applyFilterTerm(inner, f, c.ColumnDefaultID)
+				newQ, err := c.applyTerm(inner, f)
 				if err != nil {
 					groupErr = fmt.Errorf("filter %q: %w", f.Field, err)
 					return inner
@@ -68,6 +69,24 @@ func (c *PaginationService[TData, TID]) applyFilters(
 		return nil, groupErr
 	}
 	return q, nil
+}
+
+// applyTerm routes ModeCustom to the filter's inline function and everything else to applyFilterTerm.
+func (c *PaginationService[TData, TID]) applyTerm(q *bun.SelectQuery, f domains.Filter) (*bun.SelectQuery, error) {
+	if f.Mode != domains.ModeCustom {
+		return applyFilterTerm(q, f, c.ColumnDefaultID)
+	}
+	if f.Custom == nil {
+		return nil, fmt.Errorf("ModeCustom requires Filter.Custom")
+	}
+	built, err := f.Custom(q, f.Value)
+	if err != nil {
+		return nil, err
+	}
+	if built == nil {
+		return nil, fmt.Errorf("custom filter returned a nil query")
+	}
+	return built, nil
 }
 
 // applyFilterTerm builds one filter's WHERE term. columnDefaultID is only

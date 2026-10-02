@@ -2,12 +2,21 @@
 
 A generic, type-safe Go implementation of the CQRS (Command Query
 Responsibility Segregation) pattern: a write path with real Create/Update/
-Delete methods, a CDC (Change Data Capture) ingestion loop that replicates
-every write into a separate read model, and a realtime broadcast hook fired
-per applied change. It ships as a small, dependency-light **engine** —
-`src/cqrs` + `src/domains` + `src/utils` only. It does not ship a Kafka
-client, a Postgres driver choice, or a push-notification adapter; you inject
-those through three plain interfaces.
+Delete methods (plus real transactions — `Start`/`End`, atomic
+`IncrementByID`, and locked `*WithTx` reads), a CDC (Change Data Capture)
+ingestion loop that replicates every write into a separate read model, a
+full filtering/pagination query layer on the read side, and a realtime
+broadcast hook fired per applied change. It ships as a small,
+dependency-light **engine** — `src/cqrs` + `src/pagination` + `src/domains`
++ `src/utils` only. It does not ship a Kafka client, a Postgres driver
+choice, or a push-notification adapter; you inject those through plain
+interfaces.
+
+> This document covers the write path, the CDC pipeline, and the broadcast
+> hook. For everything on the **read** side — filtering, pagination,
+> single-row lookups, aggregates, nested preloads — and for how
+> transactions/row-locking actually work, see
+> **[Querying, filtering, and transactions](PAGINATION_AND_TRANSACTIONS.md)**.
 
 ## Why this exists
 
@@ -125,9 +134,10 @@ has actually processed the change.
 
 | Package | Responsibility |
 |---|---|
-| `src/cqrs` | The `CQRSImpl` engine: `Create`/`Update`/`Delete` (write path), `Run`/`processBatch`/`syncBatchToReadDB` (CDC ingestion + read-model sync), `OnCreated`/`OnUpdated`/`OnDeleted` (broadcast path), log helpers. |
-| `src/domains` | Shared types: `Channel`, `Events`, `ChangeType`, `CQRSQueuePayload[T]` (the CDC envelope), `ProcessedEvent` (idempotency ledger), and the service interfaces (`SQLService`, `LogService`, `BroadcastService`, `MessageBrokerService`). |
-| `src/utils` | Generic infrastructure used on the hot batching path: `Batcher` (channel + ticker batching), `BufferPool`/`MapPool` (`sync.Pool` wrappers to cut allocations), `BunColumnFieldIndex`/`FieldValueAt` (reflection over a `bun` struct tag, resolved once and cached rather than re-scanned per message). |
+| `src/cqrs` | The `CQRSImpl` engine: `Create`/`Update`/`Delete` (write path), `Run`/`processBatch`/`syncBatchToReadDB` (CDC ingestion + read-model sync), `OnCreated`/`OnUpdated`/`OnDeleted` (broadcast path), `Start`/`End`+`*WithTx` (transactions), log helpers — plus thin, pre-wired forwarding for everything in `src/pagination` (`Filter`, `Find`, `FindOne`, `GetByID`, `Max`/`Min`, `Count`, `Exists`, `Paginate`, `IncrementByID`, ...). |
+| `src/pagination` | The query-side engine: filtering (`domains.StructuredFilter`, including backend-only custom filters via `ModeCustom` + `Filter.Custom`), keyset/cursor pagination, nested relation preloads, and pessimistic row locking (`FOR UPDATE`) for every `*WithTx` read. Usable standalone (`pagination.NewPaginationService`) without the write/CDC engine at all. See [Querying, filtering, and transactions](PAGINATION_AND_TRANSACTIONS.md). |
+| `src/domains` | Shared types: `Channel`, `Events`, `ChangeType`, `CQRSQueuePayload[T]` (the CDC envelope), `ProcessedEvent` (idempotency ledger), the filter DSL (`StructuredFilter`, `Filter`, `Mode`, ...), and the service interfaces (`SQLService`, `LogService`, `BroadcastService`, `MessageBrokerService`, `PaginationService`). |
+| `src/utils` | Generic infrastructure used on the hot batching path: `Batcher` (channel + ticker batching), `BufferPool`/`MapPool` (`sync.Pool` wrappers to cut allocations), `BunColumnFieldIndex`/`FieldValueAt` (reflection over a `bun` struct tag, resolved once and cached rather than re-scanned per message), plus `NormalizeColumnName`/`ToPascalCase` (case-insensitive filter-field and preload-relation-name resolution). |
 
 That's the whole shipped library. There is **no** `src/kafka`, `src/pusher`,
 or `src/debezium` package — see [Bringing your own adapters](#bringing-your-own-adapters)
@@ -163,7 +173,7 @@ now (`TestErrorPaths_NewCQRS_PreservesChannel`).
 | `Channel` | Kafka topic to subscribe on **and** the broadcast channel name used when pushing events out. |
 | `ColumnDefaultID` | DB column name for the primary key (default `"id"`). Used both for `WHERE`/`WherePK()` clauses and to resolve which `TData` field is the entity ID. |
 | `ColumnDefaultSort` | Default ordering for read queries (default `"updated_at DESC"`). |
-| `Preloads` | Reserved for relation preloading; not yet consumed. |
+| `Preloads` | Default relation(s) to preload on every read/write-path call that doesn't explicitly override it (an explicit `""` argument suppresses the default for that one call) — see [Querying, filtering, and transactions](PAGINATION_AND_TRANSACTIONS.md). |
 | `ToResource func(*TData) *TResponse` | Converts a write-model row into the API resource. Called after every write, and after every CDC-applied change, before broadcasting. |
 | `TocCSV func(*TData) *map[string]any` | Row → column-map converter for CSV export. Not used internally by the engine; available for callers. |
 | `Created / Updated / Deleted func(*TData) domains.Events` | Per-change-type hook. Return the event names this change should be published under; return an empty/nil slice to suppress broadcasting for that specific change. |
@@ -172,6 +182,7 @@ now (`TestErrorPaths_NewCQRS_PreservesChannel`).
 | `LogService` | Structured logging (`info`/`error`/`warn`/`success`) — all four are actually wired into real code paths (`warn` on a synthesized EventID, `success` after a batch is synced), not just declared. |
 | `BroadcastService` | Realtime fan-out — e.g. Pusher, websockets, or webhooks. |
 | `MessageBrokerService` | `Publish`/`Subscribe` over `[]byte`; `Run()` uses it to `Subscribe` to the CDC topic. Deliberately has no method that references a concrete pub/sub client type — see below. |
+| `PaginationService` | Backs `Filter`/`Find`/`FindOne`/`GetByID`/`Max`/`Min`/`Count`/`Exists`/`Paginate`/every `*WithTx` read. Leave it nil — `NewCQRS` builds one automatically from `ReadSQLService`/`WriteSQLService`/`LogService`/the column config above. Set it yourself only to inject a different implementation. See [Querying, filtering, and transactions](PAGINATION_AND_TRANSACTIONS.md). |
 | `Validator` | `go-playground/validator`; run against the payload in `Create`/`Update`. |
 
 ## Write path (commands)
@@ -187,12 +198,22 @@ converts the result via `ToResource`:
   testing showed `UpdateByID` was the one write path with no bulk option,
   see [Testing](#testing))
 - `DeleteByID`, `DeleteByIDWithTx`, `DeleteMany`, `DeleteManyWithTx`
+- `IncrementByID`, `IncrementByIDWithTx` — atomic `SET field = field + delta`,
+  race-free under concurrent callers (no read-modify-write round trip);
+  see [Querying, filtering, and transactions](PAGINATION_AND_TRANSACTIONS.md).
+- `Start` / `End` — begin/finish a real transaction on `WriteSQLService` to
+  run several `*WithTx` calls (writes or reads) atomically together.
 
 These do **not** go through the CDC/broadcast pipeline directly — that only
 fires once Debezium has captured the change and it has round-tripped through
-Kafka into `Run()`. There is currently no generic `Get`/`List`/`Read` on
-`CQRSImpl`; reads are expected to be served directly off `ReadSQLService`
-outside this engine.
+Kafka into `Run()`.
+
+Reads are a separate, parallel surface — `Filter`, `Find`, `FindOne`,
+`GetByID`, `Max`/`Min`, `Count`, `Exists`, `Paginate` (+ every `*WithTx`
+variant), backed by `src/pagination` and pre-wired onto `CQRSImpl`
+automatically. See [Querying, filtering, and transactions](PAGINATION_AND_TRANSACTIONS.md)
+for the full read-side API, the filter DSL, and the transaction/locking
+model.
 
 ## The CDC ingestion loop (`Run`)
 
@@ -413,9 +434,11 @@ not by reasoning about the code:
 
 ## Known gaps
 
-- `TRequest` and `Preloads` are declared but not yet consumed anywhere.
-- No generic read/list method on `CQRSImpl` — reads go directly against
-  `ReadSQLService`.
+- `TRequest` is declared but not yet consumed anywhere.
+- `ModeContains`/`NotContains`/`StartsWith`/`EndsWith`'s `LIKE`-escaping has
+  no effect under SQLite (no `ESCAPE` clause is emitted) — a literal `%`/`_`
+  in the search value won't match there. Correct under Postgres. See
+  [Querying, filtering, and transactions](PAGINATION_AND_TRANSACTIONS.md).
 - No shipped `MessageBrokerService`/`BroadcastService`/Debezium-transform
   implementation — see [Bringing your own adapters](#bringing-your-own-adapters).
   Working, tested examples exist in `src/regression`, but they're test-only

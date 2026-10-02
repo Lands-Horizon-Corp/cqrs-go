@@ -37,6 +37,15 @@ func (c *PaginationService[TData, TID]) normalizeFilters(
 			normalized = append(normalized, f)
 			continue
 		}
+		// A client cannot set Custom (json:"-"), so a custom filter without one is not runnable.
+		if f.Mode == domains.ModeCustom {
+			if f.Custom == nil {
+				c.warn(ctx, fmt.Sprintf("pagination: dropping custom filter %q without a function", f.Field))
+				continue
+			}
+			normalized = append(normalized, f)
+			continue
+		}
 		f.Field = utils.NormalizeColumnName(f.Field)
 		if utils.BunColumnFieldIndex[TData](f.Field) == -1 {
 			c.warn(ctx, fmt.Sprintf("pagination: dropping filter for unknown field %q", f.Field))
